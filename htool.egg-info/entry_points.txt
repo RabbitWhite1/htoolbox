@@ -1,0 +1,2 @@
+[console_scripts]
+tmuxer = tmuxer:main

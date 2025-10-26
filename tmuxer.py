@@ -1,25 +1,16 @@
 import os
 import argparse
+import sys
 
-
-parser = argparse.ArgumentParser(description="Tmux session starter")
-parser.add_argument("-s", "--session", type=str, help="Name of the tmux session")
-parser.add_argument("-w", "--window", type=str, help="Name of the tmux window")
-parser.add_argument("-p", "--pane", type=int, help="Index of the tmux pane")
-parser.add_argument("-n", type=int, default=1, help="Number of new panes to create")
-"""
-eh = even-horizontal - All panes are arranged side by side, with equal width
-ev = even-vertical - All panes are stacked on top of each other, with equal height
-mh = main-horizontal - One large pane on top, with smaller panes arranged horizontally below it
-mv = main-vertical - One large pane on the left, with smaller panes arranged vertically to the right
-t = tiled - All panes are arranged to use the available space as efficiently as possible, with roughly equal size
-"""
-parser.add_argument("--layout", type=str, default="even-vertical", help="Layout for the tmux panes")
-parser.add_argument("--kill", action="store_true", help="Kill existing tmux session with the same name before starting a new one")
-args = parser.parse_args()
 
 def start_tmux_session(session_name, window_name=None, pane_index=None, new_panes=1, layout="even-vertical"):
-    # Start a new tmux session
+    """Start and attach to a tmux session.
+
+    This function uses the `tmux` command-line tool. It is designed to be
+    called from the CLI entry point `main()` below, but can also be imported
+    and used programmatically.
+    """
+    # Start a new tmux session detached
     os.system(f"tmux new-session -d -s {session_name}")
 
     # Create a new window if specified
@@ -31,7 +22,7 @@ def start_tmux_session(session_name, window_name=None, pane_index=None, new_pane
         os.system(f"tmux split-window -t {session_name}")
         os.system(f"tmux select-layout -t {session_name} {layout}")
 
-    # Export IID
+    # Export IID environment variable into each pane
     for i in range(new_panes):
         os.system(f"tmux send-keys -t {session_name}.{i} 'export IID={i}' C-m")
 
@@ -42,29 +33,58 @@ def start_tmux_session(session_name, window_name=None, pane_index=None, new_pane
     # Attach to the tmux session
     os.system(f"tmux attach-session -t {session_name}")
 
-if __name__ == "__main__":
-    if args.kill:
-        os.system(f"tmux kill-session -t {args.session} 2>&1 >/dev/null")
+
+def _normalize_layout(layout_arg: str) -> str:
+    v = layout_arg.lower().strip()
+    if v == "eh":
+        return "even-horizontal"
+    if v == "ev":
+        return "even-vertical"
+    if v == "mh":
+        return "main-horizontal"
+    if v == "mv":
+        return "main-vertical"
+    if v == "t":
+        return "tiled"
+    return layout_arg
+
+
+def main(argv=None) -> int:
+    """Console entry point for the `tmuxer` command.
+
+    Accepts an optional argv list (for testing). Returns 0 on success, may
+    raise exceptions for misuse.
+    """
+    parser = argparse.ArgumentParser(description="Tmux session starter")
+    parser.add_argument("-n", "--num_panes", type=int, required=True, help="Number of new panes to create")
+    parser.add_argument("-s", "--session", type=str, help="Name of the tmux session")
+    parser.add_argument("-w", "--window", type=str, help="Name of the tmux window")
+    parser.add_argument("-p", "--pane", type=int, help="Index of the tmux pane")
+    parser.add_argument("--layout", type=str, default="even-vertical", help="Layout for the tmux panes")
+    parser.add_argument("--kill", action="store_true", help="Kill existing tmux session with the same name before starting a new one")
+
+    args = parser.parse_args(argv)
+
+    if args.kill and args.session:
+        # Prefer to silence output from tmux kill-session
+        os.system(f"tmux kill-session -t {args.session} >/dev/null 2>&1")
+
     if args.n < 1:
         raise ValueError("Number of new panes must be at least 1")
 
-    if args.layout.lower().strip() == "eh":
-        layout = "even-horizontal"
-    elif args.layout.lower().strip() == "ev":
-        layout = "even-vertical"
-    elif args.layout.lower().strip() == "mh":
-        layout = "main-horizontal"
-    elif args.layout.lower().strip() == "mv":
-        layout = "main-vertical"
-    elif args.layout.lower().strip() == "t":
-        layout = "tiled"
-    else:
-        layout = args.layout
+    layout = _normalize_layout(args.layout)
 
+    # If session name is not provided, let tmux create a session with default name
     start_tmux_session(
         session_name=args.session,
         window_name=args.window,
         pane_index=args.pane,
-        new_panes=args.n if args.n else 0,
-        layout=layout
+        new_panes=args.n,
+        layout=layout,
     )
+
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
