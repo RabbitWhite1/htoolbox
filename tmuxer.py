@@ -49,7 +49,7 @@ def _normalize_layout(layout_arg: str) -> str:
     return layout_arg
 
 
-def main(argv=None) -> int:
+def main():
     """Console entry point for the `tmuxer` command.
 
     Accepts an optional argv list (for testing). Returns 0 on success, may
@@ -61,15 +61,17 @@ def main(argv=None) -> int:
     parser.add_argument("-w", "--window", type=str, help="Name of the tmux window")
     parser.add_argument("-p", "--pane", type=int, help="Index of the tmux pane")
     parser.add_argument("--layout", type=str, default="even-vertical", help="Layout for the tmux panes")
-    parser.add_argument("--kill", action="store_true", help="Kill existing tmux session with the same name before starting a new one")
+    parser.add_argument(
+        "--kill", action="store_true", help="Kill existing tmux session with the same name before starting a new one"
+    )
 
-    args = parser.parse_args(argv)
+    args = parser.parse_args()
 
     if args.kill and args.session:
         # Prefer to silence output from tmux kill-session
         os.system(f"tmux kill-session -t {args.session} >/dev/null 2>&1")
 
-    if args.n < 1:
+    if args.num_panes < 1:
         raise ValueError("Number of new panes must be at least 1")
 
     layout = _normalize_layout(args.layout)
@@ -79,12 +81,10 @@ def main(argv=None) -> int:
         session_name=args.session,
         window_name=args.window,
         pane_index=args.pane,
-        new_panes=args.n,
+        new_panes=args.num_panes,
         layout=layout,
     )
 
-    return 0
-
 
 if __name__ == "__main__":
-    sys.exit(main())
+    main()
