@@ -57,7 +57,7 @@ def main():
     """
     parser = argparse.ArgumentParser(description="Tmux session starter")
     parser.add_argument("-n", "--num_panes", type=int, required=True, help="Number of new panes to create")
-    parser.add_argument("-s", "--session", type=str, help="Name of the tmux session")
+    parser.add_argument("-s", "--session", type=str, required=True, help="Name of the tmux session")
     parser.add_argument("-w", "--window", type=str, help="Name of the tmux window")
     parser.add_argument("-p", "--pane", type=int, help="Index of the tmux pane")
     parser.add_argument("--layout", type=str, default="even-vertical", help="Layout for the tmux panes")
