@@ -1,4 +1,4 @@
-# HTool
+# HToolbox
 
 This repository provides some useful tools that fit my developing habits.
 
@@ -16,7 +16,7 @@ Or to install from source (non-editable):
 pip install .
 ```
 
-## Usage
+## tmuxer
 
 Run the installed command:
 
@@ -25,3 +25,11 @@ tmuxer -s mysession -n 3 --layout ev
 ```
 
 This will start (or attach) to a tmux session named `mysession` with 3 panes using the `even-vertical` layout (`ev`).
+
+## codeit
+
+This tool is a quick script for starting vscode server on a remote server, and utilizing SSH port forwarding to access it locally.
+
+```bash
+codeit <remote-host>
+```

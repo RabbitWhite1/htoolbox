@@ -1,7 +1,7 @@
 [project]
-name = "htool"
+name = "htoolbox"
 version = "0.1.0"
-description = "Add your description here"
+description = "This package includes various tools for developers."
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = []
