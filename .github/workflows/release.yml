@@ -58,13 +58,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          ver=$(python - <<'PY'
-import tomllib, sys
-with open("pyproject.toml", "rb") as f:
-    data = tomllib.load(f)
-print(data.get("project", {}).get("version", ""))
-PY
-          )
+          ver=$(python -c "import tomllib,sys; d=tomllib.load(open('pyproject.toml','rb')); print(d.get('project',{}).get('version',''))")
           if [ -z "$ver" ]; then
             echo "Version not found in pyproject.toml" >&2
             exit 1
