@@ -1,6 +1,96 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Usage:
+#   host="100.123.68.125"
+#   remote_addr="127.0.0.1"   # or "0.0.0.0" or any ip bound on remote
+#   port=8000
+#   kill_remote_vscode "$host" "$remote_addr" "$port"
+#
+# Returns:
+#   0 = killed successfully
+#   1 = nothing to kill / no listener found
+#   2 = listener found but not Code/code-tunnel (skipped)
+#   3 = error (ssh failure / parsing failure)
+kill_remote_vscode() {
+  local HOST="$1"
+  local REMOTE_ADDR="$2"
+  local PORT="$3"
+
+  # 1) ask remote for netstat lines that match addr:port (or 0.0.0.0:port)
+  #    we keep this simple: one ssh run returning zero or more lines
+  local netstat_cmd="netstat -ano | findstr \"${REMOTE_ADDR}:${PORT}\" | findstr LISTENING || true"
+  local netline
+  netline=$(ssh "$HOST" "$netstat_cmd") || {
+    echo "ERROR: ssh netstat failed" >&2
+    return 3
+  }
+
+  if [[ -z "$netline" ]]; then
+    echo "No listener found on ${REMOTE_ADDR}:${PORT} (or 0.0.0.0:${PORT}) on ${HOST}."
+    return 1
+  fi
+
+  # 2) extract PID(s) locally from netstat output; choose first one (adjust if you want others)
+  #    netstat lines format (Windows): Proto  Local Address  Foreign Address  State  PID
+  #    so last field is PID. Use awk to pick last column.
+  local pid
+  pid=$(printf '%s\n' "$netline" | awk '{print $NF}' | head -n1)
+  if [[ -z "$pid" ]]; then
+    echo "Failed to parse PID from netstat output:" >&2
+    printf '%s\n' "$netline" >&2
+    return 3
+  fi
+
+  echo "Found listener PID=$pid on ${HOST}:${PORT} (line: $(printf '%s' "$netline" | head -n1))."
+
+  # 3) ask remote for process name by PID using tasklist
+  #    output CSV, remove quotes, extract first column (Image Name)
+  local tasklist_cmd="tasklist /FI \"PID eq ${pid}\" /FO CSV /NH"
+  local taskline
+  taskline=$(ssh "$HOST" "$tasklist_cmd") || {
+    echo "ERROR: ssh tasklist failed" >&2
+    return 3
+  }
+
+  # If tasklist returns "INFO: No tasks are running which match the specified criteria."
+  if printf '%s\n' "$taskline" | grep -qi "No tasks are running"; then
+    echo "PID $pid is not present (may have exited)."
+    return 1
+  fi
+
+  # parse CSV: "ImageName","PID","SessionName","Session#","MemUsage"
+  # take first field and strip quotes
+  local procname
+  procname=$(printf '%s\n' "$taskline" | awk -F',' '{gsub(/"/,"",$1); print $1}' | head -n1)
+
+  if [[ -z "$procname" ]]; then
+    echo "Failed to parse process name for PID $pid. Raw: $taskline" >&2
+    return 3
+  fi
+
+  echo "PID $pid belongs to process: $procname"
+
+  # 4) check allowed names (case-insensitive)
+  local lower
+  lower=$(printf '%s' "$procname" | tr '[:upper:]' '[:lower:]')
+
+  if [[ "$lower" == "code.exe" || "$lower" == "code" || "$lower" == "code-tunnel.exe" || "$lower" == "code-tunnel" ]]; then
+    echo "Process matches Code/code-tunnel — killing PID $pid on $HOST ..."
+    # perform kill
+    ssh "$HOST" "taskkill /PID ${pid} /F" && {
+      echo "Killed PID $pid."
+      return 0
+    }
+    echo "Failed to kill PID $pid." >&2
+    return 3
+  else
+    echo "PID $pid belongs to '$procname' — not Code/code-tunnel. Skipping kill."
+    return 2
+  fi
+}
+
+
 # ----------------------------------
 # Defaults
 # ----------------------------------
@@ -104,7 +194,7 @@ fi
 # Detect remote OS
 # ----------------------------------
 echo "Detecting OS on $HOST ..."
-REMOTE_OS=$(ssh -o BatchMode=yes -o ConnectTimeout=5 "$HOST" 'uname 2>/dev/null || ver 2>/dev/null || echo unknown' | head -n 1)
+REMOTE_OS=$(ssh -o BatchMode=yes -o ConnectTimeout=5 "$HOST" 'uname' | head -n 1)
 
 case "$REMOTE_OS" in
   *[Ll]inux*)
@@ -131,12 +221,19 @@ echo "Detected remote OS: $OS_TYPE ($REMOTE_OS)"
 # Kill mode
 # ----------------------------------
 if [[ "$KILL_MODE" == true ]]; then
-  echo "Killing VS Code server on $HOST (port $PORT)..."
-  ssh "$HOST" "
-    pkill -f 'code serve-web.*--port ${PORT}' 2>/dev/null || \
-    taskkill /F /FI 'WINDOWTITLE eq Code - serve-web' 2>/dev/null || \
-    echo 'No VS Code server found on port ${PORT}'
-  "
+  echo "Killing VS Code server on $HOST (host: $REMOTE_ADDR, port: $PORT)..."
+
+  case "$OS_TYPE" in
+    windows)
+      kill_remote_vscode "$HOST" "$REMOTE_ADDR" "$PORT"
+      ;;
+
+    *)
+      echo "Unknown remote OS; cannot determine kill command safely." >&2
+      exit 1
+      ;;
+  esac
+
   exit 0
 fi
 
