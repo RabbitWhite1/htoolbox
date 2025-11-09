@@ -33,3 +33,10 @@ This tool is a quick script for starting vscode server on a remote server, and u
 ```bash
 codeit <remote-host>
 ```
+
+
+## Developer Helps
+
+
+git tag -a v0.1.2 -m "Release v0.1.2"
+git push origin v0.1.2
