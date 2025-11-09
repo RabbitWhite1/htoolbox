@@ -12,81 +12,74 @@ set -euo pipefail
 #   1 = nothing to kill / no listener found
 #   2 = listener found but not Code/code-tunnel (skipped)
 #   3 = error (ssh failure / parsing failure)
-kill_remote_vscode() {
-  local HOST="$1"
-  local REMOTE_ADDR="$2"
-  local PORT="$3"
-
-  # 1) ask remote for netstat lines that match addr:port (or 0.0.0.0:port)
-  #    we keep this simple: one ssh run returning zero or more lines
+kill_remote_vscode_windows() {
+  local HOST="$1" REMOTE_ADDR="$2" PORT="$3"
   local netstat_cmd="netstat -ano | findstr \"${REMOTE_ADDR}:${PORT}\" | findstr LISTENING || true"
   local netline
-  netline=$(ssh "$HOST" "$netstat_cmd") || {
-    echo "ERROR: ssh netstat failed" >&2
-    return 3
-  }
-
+  netline=$(ssh "$HOST" "$netstat_cmd") || { echo "ERROR: ssh netstat failed" >&2; return 3; }
   if [[ -z "$netline" ]]; then
-    echo "No listener found on ${REMOTE_ADDR}:${PORT} (or 0.0.0.0:${PORT}) on ${HOST}."
-    return 1
-  fi
-
-  # 2) extract PID(s) locally from netstat output; choose first one (adjust if you want others)
-  #    netstat lines format (Windows): Proto  Local Address  Foreign Address  State  PID
-  #    so last field is PID. Use awk to pick last column.
+    echo "No listener found on ${REMOTE_ADDR}:${PORT} on ${HOST}."; return 1; fi
   local pid
   pid=$(printf '%s\n' "$netline" | awk '{print $NF}' | head -n1)
   if [[ -z "$pid" ]]; then
-    echo "Failed to parse PID from netstat output:" >&2
-    printf '%s\n' "$netline" >&2
-    return 3
-  fi
-
-  echo "Found listener PID=$pid on ${HOST}:${PORT} (line: $(printf '%s' "$netline" | head -n1))."
-
-  # 3) ask remote for process name by PID using tasklist
-  #    output CSV, remove quotes, extract first column (Image Name)
-  local tasklist_cmd="tasklist /FI \"PID eq ${pid}\" /FO CSV /NH"
-  local taskline
-  taskline=$(ssh "$HOST" "$tasklist_cmd") || {
-    echo "ERROR: ssh tasklist failed" >&2
-    return 3
-  }
-
-  # If tasklist returns "INFO: No tasks are running which match the specified criteria."
-  if printf '%s\n' "$taskline" | grep -qi "No tasks are running"; then
-    echo "PID $pid is not present (may have exited)."
-    return 1
-  fi
-
-  # parse CSV: "ImageName","PID","SessionName","Session#","MemUsage"
-  # take first field and strip quotes
-  local procname
+    echo "Failed to parse PID from netstat output:" >&2; printf '%s\n' "$netline" >&2; return 3; fi
+  local taskline tasklist_cmd="tasklist /FI \"PID eq ${pid}\" /FO CSV /NH"
+  taskline=$(ssh "$HOST" "$tasklist_cmd") || { echo "ERROR: ssh tasklist failed" >&2; return 3; }
+  if printf '%s\n' "$taskline" | grep -qi "No tasks are running"; then echo "PID $pid not present."; return 1; fi
+  local procname lower
   procname=$(printf '%s\n' "$taskline" | awk -F',' '{gsub(/"/,"",$1); print $1}' | head -n1)
-
-  if [[ -z "$procname" ]]; then
-    echo "Failed to parse process name for PID $pid. Raw: $taskline" >&2
-    return 3
-  fi
-
-  echo "PID $pid belongs to process: $procname"
-
-  # 4) check allowed names (case-insensitive)
-  local lower
   lower=$(printf '%s' "$procname" | tr '[:upper:]' '[:lower:]')
-
   if [[ "$lower" == "code.exe" || "$lower" == "code" || "$lower" == "code-tunnel.exe" || "$lower" == "code-tunnel" ]]; then
-    echo "Process matches Code/code-tunnel — killing PID $pid on $HOST ..."
-    # perform kill
-    ssh "$HOST" "taskkill /PID ${pid} /F" && {
-      echo "Killed PID $pid."
-      return 0
-    }
-    echo "Failed to kill PID $pid." >&2
-    return 3
+    echo "Killing windows PID $pid on $HOST ..."
+    ssh "$HOST" "taskkill /PID ${pid} /F" && { echo "Killed PID $pid."; return 0; }
+    echo "Failed to kill PID $pid." >&2; return 3
   else
-    echo "PID $pid belongs to '$procname' — not Code/code-tunnel. Skipping kill."
-    return 2
+    echo "PID $pid belongs to '$procname' — not Code/code-tunnel. Skipping kill."; return 2
+  fi
+}
+
+kill_remote_vscode_unix() {
+  # Linux / macOS: find PIDs listening on REMOTE_ADDR:PORT, prefer lsof then ss, validate by command line, then kill
+  local HOST="$1" REMOTE_ADDR="$2" PORT="$3"
+  # Build remote script safely using a heredoc with placeholder substitution to avoid local shell quoting issues
+  local REMOTE_SCRIPT
+  REMOTE_SCRIPT=$(cat <<'EOS'
+set -euo pipefail
+found_pids=""
+if command -v lsof >/dev/null 2>&1; then
+  found_pids=$(lsof -nP -iTCP:__PORT__ -sTCP:LISTEN -t 2>/dev/null || true)
+fi
+if [ -z "$found_pids" ] && command -v ss >/dev/null 2>&1; then
+  found_pids=$(ss -ltnp 2>/dev/null | awk -v port=__PORT__ '$4 ~ ":"port"$" {print}' | sed -n 's/.*pid=\([0-9]\+\).*/\1/p')
+fi
+if [ -z "$found_pids" ] && command -v pgrep >/dev/null 2>&1; then
+  found_pids=$(pgrep -f "serve-web.*(--port[= ]__PORT__|:__PORT__)" || true)
+fi
+killed_any=1
+if [ -n "$found_pids" ]; then
+  for pid in $found_pids; do
+    cmdline=$(ps -p "$pid" -o args= 2>/dev/null || true)
+    echo "$cmdline" | grep -qiE "(code(|-tunnel).*(serve-web)|serve-web)" || continue
+    echo "Killing PID $pid ($cmdline)"
+    kill -TERM "$pid" 2>/dev/null || true
+  done
+  sleep 0.5
+  for pid in $found_pids; do
+    if kill -0 "$pid" 2>/dev/null; then
+      kill -KILL "$pid" 2>/dev/null || true
+    fi
+  done
+  killed_any=0
+fi
+exit "$killed_any"
+EOS
+)
+  REMOTE_SCRIPT=${REMOTE_SCRIPT//__PORT__/$PORT}
+
+  if ssh "$HOST" bash -lc "$REMOTE_SCRIPT"; then
+    echo "Remote VS Code server cleaned up (Linux/macOS)."; return 0
+  else
+    echo "No matching VS Code server found to clean on $HOST (Linux/macOS)."; return 1
   fi
 }
 
@@ -217,23 +210,26 @@ esac
 
 echo "Detected remote OS: $OS_TYPE ($REMOTE_OS)"
 
-# ----------------------------------
-# Kill mode
-# ----------------------------------
-if [[ "$KILL_MODE" == true ]]; then
-  echo "Killing VS Code server on $HOST (host: $REMOTE_ADDR, port: $PORT)..."
-
+cleanup_remote() {
+  echo "Cleaning up remote VS Code server on $HOST (host: $REMOTE_ADDR, port: $REMOTE_PORT)..."
   case "$OS_TYPE" in
     windows)
-      kill_remote_vscode "$HOST" "$REMOTE_ADDR" "$PORT"
-      ;;
-
+      kill_remote_vscode_windows "$HOST" "$REMOTE_ADDR" "$REMOTE_PORT" || true ;;
+    linux|mac)
+      kill_remote_vscode_unix "$HOST" "$REMOTE_ADDR" "$REMOTE_PORT" || true ;;
     *)
-      echo "Unknown remote OS; cannot determine kill command safely." >&2
-      exit 1
-      ;;
+      echo "Unknown remote OS; attempted generic cleanup..." ;;
   esac
+}
 
+# Ensure we attempt cleanup on Ctrl+C or script exit
+trap cleanup_remote INT TERM EXIT
+
+# ----------------------------------
+# Kill mode (explicit command)
+# ----------------------------------
+if [[ "$KILL_MODE" == true ]]; then
+  cleanup_remote
   exit 0
 fi
 
