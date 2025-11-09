@@ -53,6 +53,48 @@ jobs:
       url: https://pypi.org/project/htoolbox/
 
     steps:
+      - name: Extract version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          ver=$(python - <<'PY'
+import tomllib, sys
+with open("pyproject.toml", "rb") as f:
+    data = tomllib.load(f)
+print(data.get("project", {}).get("version", ""))
+PY
+          )
+          if [ -z "$ver" ]; then
+            echo "Version not found in pyproject.toml" >&2
+            exit 1
+          fi
+          echo "version=$ver" >> "$GITHUB_OUTPUT"
+
+      - name: Check if version already on PyPI
+        id: pypi
+        shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          PKG="htoolbox"
+          VERSION_EXISTS=$(python - <<'PY'
+import json, sys, urllib.request, os
+pkg = "htoolbox"
+try:
+    with urllib.request.urlopen(f"https://pypi.org/pypi/{pkg}/json", timeout=10) as r:
+        data = json.load(r)
+    versions = set(data.get("releases", {}).keys())
+except Exception:
+    versions = set()
+ver = os.environ.get("VERSION")
+print("true" if ver in versions else "false")
+PY
+          )
+          echo "exists=$VERSION_EXISTS" >> "$GITHUB_OUTPUT"
+          echo "PyPI has version? $VERSION_EXISTS"
+
       - name: Retrieve release distributions
         uses: actions/download-artifact@v4
         with:
@@ -60,4 +102,11 @@ jobs:
           path: dist/
 
       - name: Publish release distributions to PyPI
+        if: steps.pypi.outputs.exists != 'true'
         uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          verbose: true
+
+      - name: Skip notice (already published)
+        if: steps.pypi.outputs.exists == 'true'
+        run: echo "Version ${{ steps.version.outputs.version }} already exists on PyPI; skipping publish."
