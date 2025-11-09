@@ -19,6 +19,9 @@ concurrency:
 jobs:
   create-tag:
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      updated: ${{ steps.tag.outputs.updated }}
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4

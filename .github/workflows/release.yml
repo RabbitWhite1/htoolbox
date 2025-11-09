@@ -1,11 +1,11 @@
 name: release
 
 on:
-  # Safer default: publish only on version tags like v0.1.0
+  # Publish only on version tags like v0.1.0
   push:
     tags:
-      - "v*"
-  # Allow manual runs from the Actions tab
+      - 'v*'
+  # Allow manual runs
   workflow_dispatch:
 
 # Minimal default permissions for all jobs
@@ -21,7 +21,8 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
         with:
@@ -53,6 +54,14 @@ jobs:
       url: https://pypi.org/project/htoolbox/
 
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
       - name: Extract version
         id: version
         shell: bash
@@ -73,19 +82,7 @@ jobs:
         run: |
           set -euo pipefail
           PKG="htoolbox"
-          VERSION_EXISTS=$(python - <<'PY'
-import json, sys, urllib.request, os
-pkg = "htoolbox"
-try:
-    with urllib.request.urlopen(f"https://pypi.org/pypi/{pkg}/json", timeout=10) as r:
-        data = json.load(r)
-    versions = set(data.get("releases", {}).keys())
-except Exception:
-    versions = set()
-ver = os.environ.get("VERSION")
-print("true" if ver in versions else "false")
-PY
-          )
+          VERSION_EXISTS=$(python -c "import json,os,urllib.request; data=json.load(urllib.request.urlopen('https://pypi.org/pypi/htoolbox/json',timeout=10)); print('true' if os.environ.get('VERSION') in data.get('releases',{}) else 'false')") || VERSION_EXISTS=false
           echo "exists=$VERSION_EXISTS" >> "$GITHUB_OUTPUT"
           echo "PyPI has version? $VERSION_EXISTS"
 
