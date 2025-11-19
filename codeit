@@ -200,7 +200,8 @@ case "$REMOTE_OS" in
     ;;
   *[Mm][Ss][Yy][Ss]* | *[Mm][Ii][Nn][Gg][Ww]* | *[Cc][Yy][Gg][Ww]* | *[Ww]indows*)
     OS_TYPE="windows"
-    CODE_CMD="\"d:/App/Microsoft VS Code/bin/code\""
+    # CODE_CMD="gsudo -i Medium \"d:/App/Microsoft VS Code/bin/code\""
+    CODE_CMD="gsudo -i Medium code"
     ;;
   *)
     OS_TYPE="unknown"
@@ -241,5 +242,7 @@ echo -e "\n------------------------------------------------------------------\n"
 # Start VS Code server
 # ----------------------------------
 echo "Starting VS Code server on $HOST (bind ${REMOTE_ADDR}:${REMOTE_PORT})..."
+echo "Using command: ${CODE_CMD} serve-web --without-connection-token --accept-server-license-terms --host ${REMOTE_ADDR} --port ${REMOTE_PORT}"
 ssh -L "localhost:${PORT}:${REMOTE_ADDR}:${REMOTE_PORT}" "$HOST" \
   "${CODE_CMD} serve-web --without-connection-token --accept-server-license-terms --host ${REMOTE_ADDR} --port ${REMOTE_PORT}"
+
