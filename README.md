@@ -38,5 +38,5 @@ codeit <remote-host>
 ## Developer Helps
 
 
-git tag -a v0.1.2 -m "Release v0.1.2"
-git push origin v0.1.2
+git tag -a v0.3.0 -m "Release v0.3.0"
+git push origin v0.3.0

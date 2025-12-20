@@ -1,0 +1,132 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+print_help() {
+	cat <<EOF
+Usage: smagic <command> [options]
+
+Commands:
+  ps [-a]           List Slurm jobs (default: current user)
+  start [options]   Submit a long-running job (sbatch ... --wrap "hostname && sleep infinity")
+  run [options]     Run an interactive Bash using srun
+  bash <job>        Attach an interactive shell to a job (by ID or name)
+  kill <job>        Cancel a job (by ID or name)
+
+Global options:
+  -h, --help        Show this help message and exit
+EOF
+}
+
+get_jobid_for_target() {
+	local target="$1"
+	local jobid=""
+
+	while read -r jid jname; do
+		if [[ "${jid}" == "${target}" || "${jname}" == "${target}" ]]; then
+			jobid="${jid}"
+			break
+		fi
+	done < <(squeue -h -u "${USER}" -o "%i %j" 2>/dev/null || true)
+
+	# If nothing matched but the target is numeric, treat it as a job ID directly.
+	if [[ -z "${jobid}" && "${target}" =~ ^[0-9]+$ ]]; then
+		jobid="${target}"
+	fi
+
+	if [[ -n "${jobid}" ]]; then
+		printf '%s\n' "${jobid}"
+		return 0
+	fi
+
+	echo "smagic: no job found for target '${target}'" >&2
+	return 1
+}
+
+run_and_echo() {
+	# Echo the singularity-related Slurm command before executing it.
+	echo "+ $*"
+	exec "$@"
+}
+
+subcommand="${1-}"
+
+case "${subcommand}" in
+	""|-h|--help)
+		print_help
+		exit 0
+		;;
+esac
+
+shift || true
+
+case "${subcommand}" in
+	ps)
+		case "${1-}" in
+			-a|--all)
+				shift || true
+				run_and_echo squeue "$@"
+				;;
+			*)
+				run_and_echo squeue -u "${USER}" "$@"
+				;;
+		esac
+		;;
+
+	start)
+		case "${1-}" in
+			-h|--help)
+				# Delegate help to sbatch but rewrite the Usage header to mention smagic.
+				sbatch --help | sed 's/^Usage: sbatch /Usage: smagic start /'
+				exit 0
+				;;
+			*)
+				run_and_echo sbatch "$@" --wrap "hostname && sleep infinity"
+				;;
+		esac
+		;;
+
+	run)
+		case "${1-}" in
+			-h|--help)
+				srun --help | sed 's/^Usage: srun /Usage: smagic run /'
+				exit 0
+				;;
+			*)
+				run_and_echo srun --pty "$@" /bin/bash
+				;;
+		esac
+		;;
+
+	bash)
+		if [[ $# -lt 1 ]]; then
+			echo "Usage: smagic bash <jobid-or-name>" >&2
+			exit 1
+		fi
+
+		target="$1"
+
+		jobid="$(get_jobid_for_target "${target}")" || exit 1
+		run_and_echo srun --overlap --jobid "${jobid}" --pty /bin/bash
+		;;
+
+	kill)
+		case "${1-}" in
+			""|-h|--help)
+				echo "Usage: smagic kill <jobid-or-name>" >&2
+				exit 1
+				;;
+			*)
+				target="$1"
+				jobid="$(get_jobid_for_target "${target}")" || exit 1
+				run_and_echo scancel "${jobid}"
+				;;
+		esac
+		;;
+
+	*)
+		echo "Unknown subcommand: ${subcommand}" >&2
+		print_help >&2
+		exit 1
+		;;
+esac

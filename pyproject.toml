@@ -1,10 +1,12 @@
 [project]
 name = "htoolbox"
-version = "0.2.0"
+version = "0.3.0"
 description = "This package includes various tools for developers."
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "pip>=25.3",
+]
 
 [project.scripts]
 tmuxer = "tmuxer:main"
@@ -15,4 +17,4 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
 py-modules = ["tmuxer"]
-script-files = ["codeit"]
+script-files = ["codeit", "smagic"]
