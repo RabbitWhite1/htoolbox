@@ -44,6 +44,7 @@ kill_remote_vscode_unix() {
   # Build remote script safely using a heredoc with placeholder substitution to avoid local shell quoting issues
   local REMOTE_SCRIPT
   REMOTE_SCRIPT=$(cat <<'EOS'
+echo "Searching vscode process and Killing"
 set -euo pipefail
 found_pids=""
 if command -v lsof >/dev/null 2>&1; then
@@ -55,6 +56,7 @@ fi
 if [ -z "$found_pids" ] && command -v pgrep >/dev/null 2>&1; then
   found_pids=$(pgrep -f "serve-web.*(--port[= ]__PORT__|:__PORT__)" || true)
 fi
+echo "Found pids: $found_pids"
 killed_any=1
 if [ -n "$found_pids" ]; then
   for pid in $found_pids; do
@@ -75,12 +77,12 @@ exit "$killed_any"
 EOS
 )
   REMOTE_SCRIPT=${REMOTE_SCRIPT//__PORT__/$PORT}
-
   if ssh "$HOST" bash -lc "$REMOTE_SCRIPT"; then
     echo "Remote VS Code server cleaned up (Linux/macOS)."; return 0
   else
     echo "No matching VS Code server found to clean on $HOST (Linux/macOS)."; return 1
   fi
+
 }
 
 
