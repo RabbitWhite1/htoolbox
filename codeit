@@ -143,7 +143,38 @@ while [[ $# -gt 0 ]]; do
   shift
 done
 
-[[ -z "${HOST:-}" ]] && usage
+# If no host is provided, start a local VS Code server.
+if [[ -z "${HOST:-}" ]]; then
+  if [[ "$KILL_MODE" == true ]]; then
+    echo "Error: --kill requires a remote <host> argument." >&2
+    exit 1
+  fi
+
+  # For local mode, allow overriding bind address/port via --remote or --port.
+  if [[ -n "$REMOTE_SPEC" ]]; then
+    if [[ "$REMOTE_SPEC" == *:* ]]; then
+      REMOTE_ADDR="${REMOTE_SPEC%%:*}"
+      REMOTE_PORT="${REMOTE_SPEC##*:}"
+    elif [[ "$REMOTE_SPEC" =~ ^[0-9]+$ ]]; then
+      REMOTE_PORT="$REMOTE_SPEC"
+    else
+      REMOTE_ADDR="$REMOTE_SPEC"
+    fi
+  else
+    # If no explicit remote spec, use PORT as the listen port.
+    REMOTE_PORT="$PORT"
+  fi
+
+  if [[ "$BIND_HOST_IPV4" == true ]]; then
+    echo "Error: --bindhost (-b) requires a remote <host> argument." >&2
+    exit 1
+  fi
+
+  echo "Starting local VS Code server (bind ${REMOTE_ADDR}:${REMOTE_PORT})..."
+  code serve-web --without-connection-token --accept-server-license-terms \
+    --host "${REMOTE_ADDR}" --port "${REMOTE_PORT}"
+  exit 0
+fi
 
 # ----------------------------------
 # Validate mutual exclusivity
