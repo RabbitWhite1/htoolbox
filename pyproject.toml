@@ -9,12 +9,12 @@ dependencies = [
 ]
 
 [project.scripts]
-tmuxer = "tmuxer:main"
+tmuxer = "tmux.tmuxer:main"
 
 [build-system]
 requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-py-modules = ["tmuxer"]
-script-files = ["codeit", "smagic"]
+py-modules = ["tmux.tmuxer"]
+script-files = ["vscode/codeit", "singularity/smagic"]
