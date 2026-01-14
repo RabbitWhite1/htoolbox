@@ -119,7 +119,7 @@ def main():
     args = parse_args()
     os.makedirs(args.output, exist_ok=True)
     last_id = find_last_video_id(args.output)
-    urls = get_urls_to_download(args.urls_path)
+    urls = get_urls_to_download(args.urls)
     jobs = [(url, f"{last_id + 1 + i:04d}") for i, url in enumerate(urls)]
 
     with MyProgress() as progress, mp.Manager() as manager:
