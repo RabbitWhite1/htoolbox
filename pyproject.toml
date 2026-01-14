@@ -5,16 +5,20 @@ description = "This package includes various tools for developers."
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "dotenv>=0.9.9",
     "pip>=25.3",
+    "rich>=14.2.0",
+    "wget>=3.2",
 ]
 
 [project.scripts]
 tmuxer = "tmux.tmuxer:main"
+vd = "downloader.vd:main"
 
 [build-system]
 requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-py-modules = ["tmux.tmuxer"]
+py-modules = ["tmux.tmuxer", "downloader.vd"]
 script-files = ["vscode/codeit", "singularity/smagic"]
