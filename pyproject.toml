@@ -12,13 +12,13 @@ dependencies = [
 ]
 
 [project.scripts]
-tmuxer = "tmux.tmuxer:main"
-vd = "downloader.vd:main"
+tmuxer = "htoolbox.tmux.tmuxer:main"
+vd = "htoolbox.downloader.vd:main"
 
 [build-system]
 requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-py-modules = ["tmux.tmuxer", "downloader.vd"]
-script-files = ["vscode/codeit", "singularity/smagic"]
+py-modules = ["htoolbox.tmux.tmuxer", "htoolbox.downloader.vd"]
+script-files = ["htoolbox/vscode/codeit", "htoolbox/singularity/smagic"]
