@@ -2,8 +2,6 @@
 
 This repository provides some useful tools that fit my developing habits.
 
-## Install
-
 The package is available on PyPI, so you can directly install this package via `pip`:
 
 ```bash
@@ -21,6 +19,14 @@ cd $HOME/.htoolbox && pip install .
 
 ```bash
 uv tool install .
+```
+
+## codeit
+
+This tool is a quick script for starting vscode server on a remote server, and utilizing SSH port forwarding to access it locally.
+
+```bash
+codeit <remote-host>
 ```
 
 ## docker
@@ -47,17 +53,10 @@ This will start (or attach) to a tmux session named `mysession` with 3 panes usi
 
 A helper script `smagic` that wraps singularity commands for easier usage.
 
-## codeit
-
-This tool is a quick script for starting vscode server on a remote server, and utilizing SSH port forwarding to access it locally.
-
-```bash
-codeit <remote-host>
-```
-
 
 ## Developer Helps
 
-
+```sh
 git tag -a v0.5.1 -m "Release v0.5.1"
 git push origin v0.5.1
+```
