@@ -7,6 +7,8 @@ import shlex
 from pathlib import Path
 from typing import List, Optional, Sequence, Tuple
 
+import yaml
+
 
 CommandBatch = Tuple[List[int], List[str]]
 LAYOUT_CHOICES = {
@@ -23,6 +25,12 @@ LAYOUT_ALIASES = {
     "mv": "main-vertical",
     "t": "tiled",
 }
+CONFIG_CANDIDATES = (
+    ".tmuxer.json5",
+    ".tmuxer.yaml",
+    ".tmuxer.yml",
+    "tmuxer.conf",
+)
 
 
 def start_tmux_session(
@@ -93,22 +101,37 @@ def _load_config(path_argument: Optional[str]) -> dict:
         if not cfg_path.is_file():
             raise FileNotFoundError(f"Config file not found: {cfg_path}")
     else:
-        default_path = Path.cwd() / ".tmuxer.json5"
-        cfg_path = default_path if default_path.is_file() else None
+        cfg_path = _detect_config_path()
 
     if not cfg_path:
         return {}
 
-    with cfg_path.open("r", encoding="utf-8") as handle:
-        data = json5.load(handle)
+    data = _parse_config_file(cfg_path)
 
     if not isinstance(data, dict):
-        raise ValueError("Top-level JSON structure in config must be an object")
+        raise ValueError("Top-level structure in config must be an object")
 
     rich.print("Using tmuxer config from ", cfg_path)
     rich.print(data)
 
     return data
+
+
+def _detect_config_path() -> Optional[Path]:
+    cwd = Path.cwd()
+    for filename in CONFIG_CANDIDATES:
+        candidate = cwd / filename
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def _parse_config_file(cfg_path: Path):
+    suffix = cfg_path.suffix.lower()
+    with cfg_path.open("r", encoding="utf-8") as handle:
+        if suffix in {".yaml", ".yml"}:
+            return yaml.safe_load(handle)
+        return json5.load(handle)
 
 
 def _coalesce(value, fallback):
@@ -132,18 +155,7 @@ def _normalize_commands(commands: Optional[Sequence[dict]]) -> List[CommandBatch
         if pane_spec is None:
             raise ValueError("Each command block requires a pane_index")
 
-        if isinstance(pane_spec, int):
-            pane_indices = [pane_spec]
-        elif isinstance(pane_spec, list):
-            if not pane_spec:
-                raise ValueError("pane_index arrays cannot be empty")
-            pane_indices = []
-            for pane_value in pane_spec:
-                if not isinstance(pane_value, int):
-                    raise ValueError("pane_index entries must be integers")
-                pane_indices.append(pane_value)
-        else:
-            raise ValueError("pane_index must be an integer or list of integers")
+        pane_indices = _parse_pane_indices(pane_spec)
 
         pane_commands = block.get("commands")
         if not isinstance(pane_commands, list):
@@ -152,6 +164,47 @@ def _normalize_commands(commands: Optional[Sequence[dict]]) -> List[CommandBatch
         normalized.append((pane_indices, [str(cmd) for cmd in pane_commands]))
 
     return normalized
+
+
+def _parse_pane_indices(pane_spec) -> List[int]:
+    if isinstance(pane_spec, int):
+        return [pane_spec]
+
+    if isinstance(pane_spec, list):
+        if not pane_spec:
+            raise ValueError("pane_index arrays cannot be empty")
+        parsed = []
+        for pane_value in pane_spec:
+            if not isinstance(pane_value, int):
+                raise ValueError("pane_index entries must be integers")
+            parsed.append(pane_value)
+        return sorted(set(parsed))
+
+    if isinstance(pane_spec, str):
+        pane_spec = pane_spec.strip()
+        if not pane_spec:
+            raise ValueError("pane_index string cannot be empty")
+
+        segments = [seg.strip() for seg in pane_spec.split(",") if seg.strip()]
+        indices: List[int] = []
+        for segment in segments:
+            if "-" in segment:
+                parts = segment.split("-", 1)
+                if len(parts) != 2 or not parts[0] or not parts[1]:
+                    raise ValueError(f"Invalid pane range '{segment}'")
+                start = int(parts[0])
+                end = int(parts[1])
+                if start > end:
+                    raise ValueError(f"pane range start must be <= end in '{segment}'")
+                indices.extend(list(range(start, end + 1)))
+            else:
+                indices.append(int(segment))
+
+        if not indices:
+            raise ValueError("pane_index string must resolve to at least one pane")
+        return sorted(set(indices))
+
+    raise ValueError("pane_index must be int, list of ints, or a string specification")
 
 
 def main():
