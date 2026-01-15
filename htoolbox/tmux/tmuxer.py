@@ -11,13 +11,6 @@ import yaml
 
 
 CommandBatch = Tuple[List[int], List[str]]
-LAYOUT_CHOICES = {
-    "even-horizontal",
-    "even-vertical",
-    "main-horizontal",
-    "main-vertical",
-    "tiled",
-}
 LAYOUT_ALIASES = {
     "eh": "even-horizontal",
     "ev": "even-vertical",
@@ -25,11 +18,12 @@ LAYOUT_ALIASES = {
     "mv": "main-vertical",
     "t": "tiled",
 }
+LAYOUT_OPTIONS = set(LAYOUT_ALIASES.values()).union(set(LAYOUT_ALIASES.keys()))
 CONFIG_CANDIDATES = (
+    ".tmuxer.json",
     ".tmuxer.json5",
     ".tmuxer.yaml",
     ".tmuxer.yml",
-    "tmuxer.conf",
 )
 
 
@@ -76,11 +70,9 @@ def _normalize_layout(layout_arg: str) -> str:
     v = str(layout_arg).lower().strip()
     if v in LAYOUT_ALIASES:
         return LAYOUT_ALIASES[v]
-    if v in LAYOUT_CHOICES:
+    if v in LAYOUT_ALIASES.values():
         return v
-    raise ValueError(
-        "layout must be one of: " + ", ".join(sorted(LAYOUT_CHOICES.union(LAYOUT_ALIASES.keys())))
-    )
+    raise ValueError("layout must be one of: " + ", ".join(sorted(LAYOUT_OPTIONS)))
 
 
 def _send_commands_to_panes(session_name: str, command_batches: Optional[Sequence[CommandBatch]]):
@@ -221,7 +213,7 @@ def main():
     parser.add_argument(
         "--layout",
         type=str,
-        choices=sorted(LAYOUT_CHOICES.union(LAYOUT_ALIASES.keys())),
+        choices=sorted(LAYOUT_OPTIONS),
         help="Layout for the tmux panes",
     )
     parser.add_argument(
