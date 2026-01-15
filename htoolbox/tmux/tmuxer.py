@@ -9,6 +9,20 @@ from typing import List, Optional, Sequence, Tuple
 
 
 CommandBatch = Tuple[List[int], List[str]]
+LAYOUT_CHOICES = {
+    "even-horizontal",
+    "even-vertical",
+    "main-horizontal",
+    "main-vertical",
+    "tiled",
+}
+LAYOUT_ALIASES = {
+    "eh": "even-horizontal",
+    "ev": "even-vertical",
+    "mh": "main-horizontal",
+    "mv": "main-vertical",
+    "t": "tiled",
+}
 
 
 def start_tmux_session(
@@ -51,18 +65,14 @@ def start_tmux_session(
 
 
 def _normalize_layout(layout_arg: str) -> str:
-    v = layout_arg.lower().strip()
-    if v == "eh":
-        return "even-horizontal"
-    if v == "ev":
-        return "even-vertical"
-    if v == "mh":
-        return "main-horizontal"
-    if v == "mv":
-        return "main-vertical"
-    if v == "t":
-        return "tiled"
-    return layout_arg
+    v = str(layout_arg).lower().strip()
+    if v in LAYOUT_ALIASES:
+        return LAYOUT_ALIASES[v]
+    if v in LAYOUT_CHOICES:
+        return v
+    raise ValueError(
+        "layout must be one of: " + ", ".join(sorted(LAYOUT_CHOICES.union(LAYOUT_ALIASES.keys())))
+    )
 
 
 def _send_commands_to_panes(session_name: str, command_batches: Optional[Sequence[CommandBatch]]):
@@ -155,7 +165,12 @@ def main():
     parser.add_argument("-s", "--session", type=str, help="Name of the tmux session")
     parser.add_argument("-w", "--window", type=str, help="Name of the tmux window")
     parser.add_argument("-p", "--pane", type=int, help="Index of the tmux pane")
-    parser.add_argument("--layout", type=str, help="Layout for the tmux panes")
+    parser.add_argument(
+        "--layout",
+        type=str,
+        choices=sorted(LAYOUT_CHOICES.union(LAYOUT_ALIASES.keys())),
+        help="Layout for the tmux panes",
+    )
     parser.add_argument(
         "--kill", action="store_true", help="Kill existing tmux session with the same name before starting a new one"
     )
