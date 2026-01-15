@@ -5,7 +5,10 @@ import os.path as osp
 import rich
 import shlex
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import List, Optional, Sequence, Tuple
+
+
+CommandBatch = Tuple[List[int], List[str]]
 
 
 def start_tmux_session(
@@ -14,7 +17,7 @@ def start_tmux_session(
     pane_index=None,
     new_panes=1,
     layout="even-vertical",
-    commands=None,
+    command_batches=None,
 ):
     """Start and attach to a tmux session.
 
@@ -34,12 +37,10 @@ def start_tmux_session(
         os.system(f"tmux split-window -t {session_name}")
         os.system(f"tmux select-layout -t {session_name} {layout}")
 
-    commands = commands or {}
-
     for pane_index in range(new_panes):
         os.system(f"tmux send-keys -t {session_name}.{pane_index} 'export IID={pane_index}' C-m")
 
-    _send_commands_to_panes(session_name=session_name, commands=commands)
+    _send_commands_to_panes(session_name=session_name, command_batches=command_batches)
 
     # Select the specified pane if provided
     if pane_index is not None:
@@ -64,13 +65,16 @@ def _normalize_layout(layout_arg: str) -> str:
     return layout_arg
 
 
-def _send_commands_to_panes(session_name: str, commands: Optional[Dict[int, List[str]]]):
-    if not commands:
+def _send_commands_to_panes(session_name: str, command_batches: Optional[Sequence[CommandBatch]]):
+    """Run configured command batches sequentially across panes."""
+
+    if not command_batches:
         return
 
-    for pane_index, pane_commands in commands.items():
-        for cmd in pane_commands:
-            os.system(f"tmux send-keys -t {session_name}.{pane_index} {shlex.quote(cmd)} C-m")
+    for pane_indices, pane_commands in command_batches:
+        for pane_index in pane_indices:
+            for cmd in pane_commands:
+                os.system(f"tmux send-keys -t {session_name}.{pane_index} {shlex.quote(cmd)} C-m")
 
 
 def _load_config(path_argument: Optional[str]) -> dict:
@@ -101,22 +105,42 @@ def _coalesce(value, fallback):
     return value if value is not None else fallback
 
 
-def _normalize_commands(commands: Optional[dict]) -> Dict[int, List[str]]:
+def _normalize_commands(commands: Optional[Sequence[dict]]) -> List[CommandBatch]:
     if not commands:
-        return {}
-    if not isinstance(commands, dict):
-        raise ValueError("commands section must be a JSON object keyed by pane index")
-    normalized: Dict[int, List[str]] = {}
-    for pane_key, pane_commands in commands.items():
-        try:
-            pane_index = int(pane_key)
-        except (TypeError, ValueError) as exc:  # pragma: no cover - defensive
-            raise ValueError(f"Pane key '{pane_key}' must be an integer") from exc
+        return []
 
+    if not isinstance(commands, list):
+        raise ValueError("commands section must be a list of command blocks")
+
+    normalized: List[CommandBatch] = []
+
+    for idx, block in enumerate(commands):
+        if not isinstance(block, dict):
+            raise ValueError(f"Command block #{idx + 1} must be a JSON object")
+
+        pane_spec = block.get("pane_index")
+        if pane_spec is None:
+            raise ValueError("Each command block requires a pane_index")
+
+        if isinstance(pane_spec, int):
+            pane_indices = [pane_spec]
+        elif isinstance(pane_spec, list):
+            if not pane_spec:
+                raise ValueError("pane_index arrays cannot be empty")
+            pane_indices = []
+            for pane_value in pane_spec:
+                if not isinstance(pane_value, int):
+                    raise ValueError("pane_index entries must be integers")
+                pane_indices.append(pane_value)
+        else:
+            raise ValueError("pane_index must be an integer or list of integers")
+
+        pane_commands = block.get("commands")
         if not isinstance(pane_commands, list):
-            raise ValueError(f"Commands for pane {pane_index} must be a list of strings")
+            raise ValueError("commands list must be a list.")
 
-        normalized[pane_index] = [str(cmd) for cmd in pane_commands]
+        normalized.append((pane_indices, [str(cmd) for cmd in pane_commands]))
+
     return normalized
 
 
@@ -147,7 +171,7 @@ def main():
     pane = _coalesce(args.pane, config.get("pane"))
     layout_arg = _coalesce(args.layout, config.get("layout", "even-vertical"))
     kill_existing = args.kill or bool(config.get("kill"))
-    commands = _normalize_commands(config.get("commands"))
+    command_batches = _normalize_commands(config.get("commands"))
 
     if num_panes is None:
         raise ValueError("num_panes must be provided via CLI or config")
@@ -171,7 +195,7 @@ def main():
         pane_index=pane_index,
         new_panes=num_panes,
         layout=layout,
-        commands=commands,
+        command_batches=command_batches,
     )
 
 

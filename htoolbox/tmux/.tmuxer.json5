@@ -5,16 +5,31 @@
   "layout": "even-vertical",
   "pane": 0,
   "kill": true,
-  "commands": {
-    "0": [
-      "bash",
-      "cd /usr",
-    ],
-    "1": [
-      "cd /bin",
-    ],
-    "2": [
-      "htop",
-    ]
-  }
+  "commands": [
+    {
+      "pane_index": [0, 1],
+      "commands": [
+        "bash",
+      ]
+    },
+    {
+      "pane_index": 0,
+      "commands": [
+        "bash",
+        "cd /usr"
+      ]
+    },
+    {
+      "pane_index": 1,
+      "commands": [
+        "cd /bin"
+      ]
+    },
+    {
+      "pane_index": 2,
+      "commands": [
+        "htop"
+      ]
+    }
+  ]
 }

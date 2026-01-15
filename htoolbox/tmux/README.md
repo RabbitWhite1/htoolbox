@@ -22,4 +22,9 @@ options:
 
 ### Using a Config File
 
-Check [.tmuxer.json5](.tmuxer.json5) for an example.
+Check [.tmuxer.json5](.tmuxer.json5) for an example. Try it out by just running:
+
+```sh
+cd htoolbox/tmux
+tmuxer  # The `.tmuxer.json5` in the current directory will be auto-loaded
+```
