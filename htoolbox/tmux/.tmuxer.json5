@@ -1,0 +1,20 @@
+{
+  "session": "dev-session",
+  "window": "workspace",
+  "num_panes": 3,
+  "layout": "even-vertical",
+  "pane": 0,
+  "kill": true,
+  "commands": {
+    "0": [
+      "bash",
+      "cd /usr",
+    ],
+    "1": [
+      "cd /bin",
+    ],
+    "2": [
+      "htop",
+    ]
+  }
+}
