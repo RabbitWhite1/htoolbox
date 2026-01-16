@@ -5,7 +5,7 @@ import os.path as osp
 import rich
 import shlex
 from pathlib import Path
-from typing import List, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 import yaml
 
@@ -87,7 +87,7 @@ def _send_commands_to_panes(session_name: str, command_batches: Optional[Sequenc
                 os.system(f"tmux send-keys -t {session_name}.{pane_index} {shlex.quote(cmd)} C-m")
 
 
-def _load_config(path_argument: Optional[str]) -> dict:
+def _load_config(path_argument: Optional[str], placeholders: Optional[Dict[str, str]] = None) -> dict:
     if path_argument:
         cfg_path = Path(path_argument).expanduser()
         if not cfg_path.is_file():
@@ -98,7 +98,7 @@ def _load_config(path_argument: Optional[str]) -> dict:
     if not cfg_path:
         return {}
 
-    data = _parse_config_file(cfg_path)
+    data = _parse_config_file(cfg_path, placeholders or {})
 
     if not isinstance(data, dict):
         raise ValueError("Top-level structure in config must be an object")
@@ -118,12 +118,43 @@ def _detect_config_path() -> Optional[Path]:
     return None
 
 
-def _parse_config_file(cfg_path: Path):
+def _parse_config_file(cfg_path: Path, placeholders: Dict[str, str]):
     suffix = cfg_path.suffix.lower()
     with cfg_path.open("r", encoding="utf-8") as handle:
-        if suffix in {".yaml", ".yml"}:
-            return yaml.safe_load(handle)
-        return json5.load(handle)
+        contents = handle.read()
+
+    rendered = _apply_placeholders(contents, placeholders)
+
+    if suffix in {".yaml", ".yml"}:
+        return yaml.safe_load(rendered)
+    return json5.loads(rendered)
+
+
+def _apply_placeholders(text: str, placeholders: Dict[str, str]) -> str:
+    if not placeholders:
+        return text
+
+    rendered = text
+    for name, value in placeholders.items():
+        rendered = rendered.replace(f"<{name}>", str(value))
+    return rendered
+
+
+def _parse_placeholder_args(raw_values: Optional[Sequence[str]]) -> Dict[str, str]:
+    if not raw_values:
+        return {}
+
+    placeholders: Dict[str, str] = {}
+    for raw in raw_values:
+        if "=" not in raw:
+            raise ValueError("Placeholder definitions must be in NAME=VALUE format")
+        name, value = raw.split("=", 1)
+        name = name.strip()
+        if not name:
+            raise ValueError("Placeholder names cannot be empty")
+        placeholders[name] = value
+
+    return placeholders
 
 
 def _coalesce(value, fallback):
@@ -220,10 +251,19 @@ def main():
         "--kill", action="store_true", help="Kill existing tmux session with the same name before starting a new one"
     )
     parser.add_argument("-c", "--config", type=str, help="Path to tmuxer JSON config file")
+    parser.add_argument(
+        "-P",
+        "--placeholder",
+        metavar="NAME=VALUE",
+        action="append",
+        default=[],
+        help="Define placeholder substitutions for config files; repeatable",
+    )
 
     args = parser.parse_args()
 
-    config = _load_config(args.config)
+    placeholder_values = _parse_placeholder_args(args.placeholder)
+    config = _load_config(args.config, placeholder_values)
 
     num_panes = _coalesce(args.num_panes, config.get("num_panes"))
     session = _coalesce(args.session, config.get("session"))

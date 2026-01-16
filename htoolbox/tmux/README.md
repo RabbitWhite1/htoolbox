@@ -18,13 +18,30 @@ options:
   --layout LAYOUT       Layout for the tmux panes
   --kill                Kill existing tmux session with the same name before starting a new one
   -c, --config CONFIG   Path to tmuxer JSON config file
+  -P, --placeholder NAME=VALUE
+                        Define placeholder substitutions for config files; can be repeated
 ```
 
 ### Using a Config File
 
-Check [.tmuxer.json5](.tmuxer.json5) for an example. Try it out by just running:
+Both JSON and YAML config files are supported.
+
+Check [.tmuxer.yaml](.tmuxer.yaml) for an example. Try it out by just running:
 
 ```sh
 cd htoolbox/tmux
-tmuxer  # The `.tmuxer.json5` in the current directory will be auto-loaded
+tmuxer  # The `.tmuxer.yaml` in the current directory will be auto-loaded
+```
+
+### Placeholders
+
+Configs may contain placeholder tokens such as `<project_root>`. Provide values with one or more
+`--placeholder project_root=/tmp/foo` flags. Each token is replaced via string substitution before the
+config is parsed, and placeholders can be used in both YAML and JSON configs.
+
+You can try:
+
+```sh
+cd htoolbox/tmux
+tmuxer -c .tmuxer.placeholder.yaml -P somedir=/usr
 ```
