@@ -1,0 +1,74 @@
+#!/bin/bash
+
+# --- 配置 ---
+RETRY_INTERVAL=2
+SAVE_DIR="$HOME/Pictures"
+mkdir -p "$SAVE_DIR"
+f="$SAVE_DIR/$(date +%Y%m%d-%H%M%S).png"
+
+# --- 1. 扫描仪检测与选择 ---
+echo "正在搜索可用的扫描仪..."
+# 获取扫描仪列表并存入数组
+mapfile -t DEVICES < <(scanimage -L | sed -n "s/^device \`\(.*\)' is a.*/\1/p")
+
+if [ ${#DEVICES[@]} -eq 0 ]; then
+    echo "❌ 未检测到任何扫描仪。请检查网络或电源。"
+    exit 1
+fi
+
+# 确定默认扫描仪 (优先匹配 airscan，否则选择第一个)
+DEFAULT_INDEX=0
+for i in "${!DEVICES[@]}"; do
+    if [[ "${DEVICES[$i]}" == *"airscan"* ]]; then
+        DEFAULT_INDEX=$i
+        break
+    fi
+done
+
+echo -e "\n检测到以下扫描仪:"
+for i in "${!DEVICES[@]}"; do
+    prefix="  "
+    [[ $i -eq $DEFAULT_INDEX ]] && prefix="* "
+    echo -e "${prefix}[$i] ${DEVICES[$i]}"
+done
+
+echo -en "\n请输入序号选择扫描仪 (直接回车默认使用星号项): "
+read -r USER_CHOICE
+
+# 逻辑：如果输入为空，则使用默认索引；否则使用用户输入的索引
+if [[ -z "$USER_CHOICE" ]]; then
+    SELECTED_DEVICE="${DEVICES[$DEFAULT_INDEX]}"
+else
+    SELECTED_DEVICE="${DEVICES[$USER_CHOICE]}"
+fi
+
+echo -e "已选择: \033[1;34m$SELECTED_DEVICE\033[0m\n"
+
+# --- 2. 扫描循环 ---
+for i in {0..1}
+do
+    echo "正在扫描至 $f ..."
+    scanimage -d "$SELECTED_DEVICE" --format=png > "$f"
+
+    if [ $? -eq 0 ]; then
+        echo "✅ 扫描成功！"
+        echo "--- 图片预览 ---"
+        # 使用 chafa 显示图片，优化显示效果
+        chafa --colors full "$f"
+        
+        echo -e "\n文件已保存至: $f"
+        exit 0
+    else
+        echo -e "❌ 扫描失败，检查：\n\t1. 是否连接到同一局域网\n\t2. 打印机是否开机\n\t3. 打印机的无线网指示灯是否亮起\n\t4. \033[1;31m检查 Tailscale 状态\033[0m"
+        [ -f "$f" ] && rm "$f"
+    fi
+
+    if [ $i -lt 1 ]; then
+        echo -e "\n第一次尝试可能由于唤醒延迟失败，$RETRY_INTERVAL 秒后自动重试..."
+        sleep $RETRY_INTERVAL
+    fi
+done
+
+read -n 1 -s -r -p "按任意键退出..."
+echo -e "\n"
+
