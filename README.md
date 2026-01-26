@@ -57,6 +57,6 @@ A helper script `smagic` that wraps singularity commands for easier usage.
 ## Developer Helps
 
 ```sh
-git tag -a v0.6.0 -m "Release v0.6.0"
-git push origin v0.6.0
+git tag -a v0.7.0 -m "Release v0.7.0"
+git push origin v0.7.0
 ```
