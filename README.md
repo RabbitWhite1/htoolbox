@@ -53,10 +53,6 @@ This will start (or attach) to a tmux session named `mysession` with 3 panes usi
 
 A helper script `smagic` that wraps singularity commands for easier usage.
 
+## Release Workflow
 
-## Developer Helps
-
-```sh
-git tag -a v0.7.0 -m "Release v0.7.0"
-git push origin v0.7.0
-```
+Use the helper script `./tag_version <new_version>` to bump the version stored in `pyproject.toml`. The script will print the git commands needed to create and push the release tag so you can copy and run them manually.

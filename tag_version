@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+usage() {
+	cat <<'USAGE'
+tag_version: update project version in pyproject.toml
+
+Usage:
+	tag_version <new_version>
+
+Example:
+	tag_version 0.6.0
+USAGE
+}
+
+if [[ $# -ne 1 ]]; then
+	usage >&2
+	exit 1
+fi
+
+VERSION="$1"
+
+# Basic semver check with optional suffix (e.g., -beta, rc1)
+if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([A-Za-z0-9.-]+)?$ ]]; then
+	echo "Error: Version '$VERSION' is not a valid semver (X.Y.Z or X.Y.Z-suffix)." >&2
+	exit 1
+fi
+
+PYPROJECT="pyproject.toml"
+if [[ ! -f $PYPROJECT ]]; then
+	echo "Error: $PYPROJECT not found in $(pwd)." >&2
+	exit 1
+fi
+
+CURRENT=$(grep -E '^version *= *"' "$PYPROJECT" | head -1 | sed -E 's/.*version *= *"([^"]+)".*/\1/') || CURRENT=""
+if [[ -z "$CURRENT" ]]; then
+	echo "Error: Could not determine current version from $PYPROJECT" >&2
+	exit 1
+fi
+
+# Replace the first version assignment while preserving the rest of the file
+tmp_file=$(mktemp)
+awk -v newv="$VERSION" 'BEGIN{done=0} /^version *= *"/ && !done {sub(/"[^"]+"/,"\"" newv "\""); done=1} {print} END{if(done==0) exit 2}' "$PYPROJECT" > "$tmp_file" || {
+	status=$?
+	rm -f "$tmp_file"
+	echo "Error: Failed to update version (awk exited $status)." >&2
+	exit 1
+}
+
+mv "$tmp_file" "$PYPROJECT"
+
+echo "Updated $PYPROJECT: $CURRENT -> $VERSION"
+
+cat <<INSTRUCTIONS
+
+Next steps (run manually):
+
+git add .
+git add $PYPROJECT
+git commit -m "v$VERSION"
+git tag -a v$VERSION -m "Release v$VERSION"
+git push origin main
+git push origin v$VERSION
+
+INSTRUCTIONS
