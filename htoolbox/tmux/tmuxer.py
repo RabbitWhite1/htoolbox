@@ -41,12 +41,10 @@ def start_tmux_session(
     called from the CLI entry point `main()` below, but can also be imported
     and used programmatically.
     """
-    # Start a new tmux session detached
-    os.system(f"tmux new-session -d -s {session_name}")
-
-    # Create a new window if specified
     if window_name:
-        os.system(f"tmux new-window -t {session_name} -n {window_name}")
+        os.system(f"tmux new-session -d -s {session_name} -n {window_name}")
+    else:
+        os.system(f"tmux new-session -d -s {session_name}")
 
     # Create new panes if specified
     for i in range(1, new_panes):
