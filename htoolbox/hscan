@@ -2,7 +2,7 @@
 
 # --- 配置 ---
 RETRY_INTERVAL=2
-SAVE_DIR="$HOME/Pictures"
+SAVE_DIR="${1:-$HOME/Pictures}"
 mkdir -p "$SAVE_DIR"
 f="$SAVE_DIR/$(date +%Y%m%d-%H%M%S).png"
 
