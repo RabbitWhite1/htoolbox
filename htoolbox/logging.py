@@ -1,5 +1,7 @@
 import logging
 import os
+import re
+from pathlib import Path
 
 from colorama import Fore, Style
 from rich.logging import RichHandler
@@ -92,16 +94,28 @@ class AnsiAwareRichHandler(RichHandler):
         return super().render_message(record, message)
 
 
+class StripAnsiFormatter(logging.Formatter):
+    _ansi_re = re.compile(r"\x1b\[[0-9;]*m")
+
+    def format(self, record):
+        message = super().format(record)
+        return self._ansi_re.sub("", message)
+
+
 def init_global_logger(
-    name="HToolbox",
-    console_level=logging.ERROR,
-    file_level=logging.INFO,
-    mode: str = "w",
-    path=None,
-    show_time=False,
-    show_level=False,
-    show_path=False,
+    name: str = "HToolbox",
+    # For console logging
+    console_level: int = logging.INFO,
+    show_time: bool = True,
+    show_level: bool = True,
+    show_path: bool = False,
     enable_rich: bool = True,
+    # For file logging
+    file_level: int = logging.NOTSET,
+    mode: str = "w",
+    path: Path = None,
+    file_time_format: str = "%Y/%m/%d %H:%M:%S",
+    file_format: str = "%(asctime)s %(levelname)s %(message)s",
 ):
     global LOGGER
     logger = logging.getLogger(name)
@@ -111,11 +125,11 @@ def init_global_logger(
     # Setup console handler
     if enable_rich:
         console_handler = AnsiAwareRichHandler(
-            level=logging.DEBUG,
+            level=console_level,
             show_time=show_time,
             show_level=show_level,
             show_path=show_path,
-            log_time_format="%Y/%m/%d %H:%M:%S"
+            log_time_format="%Y/%m/%d %H:%M:%S",
         )
     else:
         console_handler = logging.StreamHandler()
@@ -124,7 +138,12 @@ def init_global_logger(
 
     # Setup file handler
     if path is not None:
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
         file_handler = logging.FileHandler(path, mode)
+        file_handler.setFormatter(
+            StripAnsiFormatter(fmt=file_format, datefmt=file_time_format)
+        )
         file_handler.setLevel(file_level)
         logger.addHandler(file_handler)
     LOGGER = logger
