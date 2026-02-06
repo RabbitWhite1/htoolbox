@@ -25,7 +25,8 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools]
 py-modules = ["htoolbox.tmux.tmuxer", "htoolbox.downloader.vd"]
 script-files = [
-    "htoolbox/vscode/codeit", 
+    "htoolbox/vscode/codeit",
     "htoolbox/hscan",
-    "htoolbox/singularity/smagic"
+    "htoolbox/singularity/smagic",
 ]
+packages = ["htoolbox"]
