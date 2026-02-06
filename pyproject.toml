@@ -1,6 +1,6 @@
 [project]
 name = "htoolbox"
-version = "0.8.1"
+version = "0.8.2"
 description = "This package includes various tools for developers."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -23,10 +23,12 @@ requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-py-modules = ["htoolbox.tmux.tmuxer", "htoolbox.downloader.vd"]
 script-files = [
-    "htoolbox/vscode/codeit",
+    "htoolbox/vscode/codeit", 
     "htoolbox/hscan",
-    "htoolbox/singularity/smagic",
+    "htoolbox/singularity/smagic"
 ]
-packages = ["htoolbox"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["htoolbox*"]
