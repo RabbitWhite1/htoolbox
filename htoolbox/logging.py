@@ -93,6 +93,7 @@ class AnsiAwareRichHandler(RichHandler):
 
 
 def init_global_logger(
+    name="HToolbox",
     console_level=logging.ERROR,
     file_level=logging.INFO,
     mode: str = "w",
@@ -103,7 +104,7 @@ def init_global_logger(
     enable_rich: bool = True,
 ):
     global LOGGER
-    logger = logging.getLogger("HToolbox")
+    logger = logging.getLogger(name)
     lowest_level = min(console_level, file_level)
     logger.setLevel(lowest_level)
 
@@ -114,6 +115,7 @@ def init_global_logger(
             show_time=show_time,
             show_level=show_level,
             show_path=show_path,
+            log_time_format="%Y/%m/%d %H:%M:%S"
         )
     else:
         console_handler = logging.StreamHandler()
