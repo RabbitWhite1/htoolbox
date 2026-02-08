@@ -11,7 +11,7 @@ options:
   -h, --help            show this help message and exit
   -n, --num_panes NUM_PANES
                         Number of new panes to create
-  -s, --session SESSION
+  -s, --session SESSION 
                         Name of the tmux session
   -w, --window WINDOW   Name of the tmux window
   -p, --pane PANE       Index of the tmux pane

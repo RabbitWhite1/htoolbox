@@ -1,14 +1,13 @@
 import argparse
-import json5
 import os
 import os.path as osp
-import rich
 import shlex
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
 
+import json5
+import rich
 import yaml
-
 
 CommandBatch = Tuple[List[int], List[str]]
 LAYOUT_ALIASES = {
@@ -25,15 +24,35 @@ CONFIG_CANDIDATES = (
     ".tmuxer.yaml",
     ".tmuxer.yml",
 )
+PLACEHOLDER_CONFIG_YAML = """session: tmuxer-session
+windows:
+    - window: workspace
+      num_panes: 3
+      layout: even-vertical
+      pane: 0
+      kill: true
+      commands:
+          - pane_index: "0-1"
+              commands:
+                  - bash
+          - pane_index: "0"
+              commands:
+                  - bash
+                  - cd <somedir>
+          - pane_index: "1"
+              commands:
+                  - cd /bin
+          - pane_index: "2"
+              commands:
+                  - htop
+"""
 
 
 def start_tmux_session(
     session_name,
-    window_name=None,
-    pane_index=None,
-    new_panes=1,
-    layout="even-vertical",
-    command_batches=None,
+    windows,
+    focus_window=0,
+    focus_pane=0,
 ):
     """Start and attach to a tmux session.
 
@@ -41,24 +60,48 @@ def start_tmux_session(
     called from the CLI entry point `main()` below, but can also be imported
     and used programmatically.
     """
-    if window_name:
-        os.system(f"tmux new-session -d -s {session_name} -n {window_name}")
-    else:
-        os.system(f"tmux new-session -d -s {session_name}")
+    if not windows:
+        raise ValueError("At least one window must be provided")
 
-    # Create new panes if specified
-    for i in range(1, new_panes):
-        os.system(f"tmux split-window -t {session_name}")
-        os.system(f"tmux select-layout -t {session_name} {layout}")
+    for window_index, window_cfg in enumerate(windows):
+        window_name = window_cfg.get("window")
+        new_panes = window_cfg["num_panes"]
+        layout = window_cfg["layout"]
+        command_batches = window_cfg.get("commands")
 
-    for pane_index in range(new_panes):
-        os.system(f"tmux send-keys -t {session_name}.{pane_index} 'export IID={pane_index}' C-m")
+        if window_index == 0:
+            if window_name:
+                os.system(f"tmux new-session -d -s {session_name} -n {window_name}")
+            else:
+                os.system(f"tmux new-session -d -s {session_name}")
+        else:
+            if window_name:
+                os.system(f"tmux new-window -t {session_name} -n {window_name}")
+            else:
+                os.system(f"tmux new-window -t {session_name}")
 
-    _send_commands_to_panes(session_name=session_name, command_batches=command_batches)
+        window_target = f"{session_name}:{window_index}"
+
+        # Create new panes if specified
+        for _ in range(1, new_panes):
+            os.system(f"tmux split-window -t {window_target}")
+            os.system(f"tmux select-layout -t {window_target} {layout}")
+
+        for pane_index in range(new_panes):
+            os.system(
+                f"tmux send-keys -t {window_target}.{pane_index} 'export IID={pane_index}' C-m"
+            )
+
+        _send_commands_to_panes(
+            session_name=session_name,
+            window_index=window_index,
+            command_batches=command_batches,
+        )
 
     # Select the specified pane if provided
-    if pane_index is not None:
-        os.system(f"tmux select-pane -t {session_name}:{pane_index}")
+    os.system(f"tmux select-window -t {session_name}:{focus_window}")
+    if focus_pane is not None:
+        os.system(f"tmux select-pane -t {session_name}:{focus_window}.{focus_pane}")
 
     # Attach to the tmux session
     os.system(f"tmux attach-session -t {session_name}")
@@ -73,23 +116,40 @@ def _normalize_layout(layout_arg: str) -> str:
     raise ValueError("layout must be one of: " + ", ".join(sorted(LAYOUT_OPTIONS)))
 
 
-def _send_commands_to_panes(session_name: str, command_batches: Optional[Sequence[CommandBatch]]):
+def _send_commands_to_panes(
+    session_name: str,
+    window_index: int,
+    command_batches: Optional[Sequence[CommandBatch]],
+):
     """Run configured command batches sequentially across panes."""
 
     if not command_batches:
         return
 
+    window_target = f"{session_name}:{window_index}"
     for pane_indices, pane_commands in command_batches:
         for pane_index in pane_indices:
             for cmd in pane_commands:
-                os.system(f"tmux send-keys -t {session_name}.{pane_index} {shlex.quote(cmd)} C-m")
+                os.system(
+                    f"tmux send-keys -t {window_target}.{pane_index} {shlex.quote(cmd)} C-m"
+                )
 
 
-def _load_config(path_argument: Optional[str], placeholders: Optional[Dict[str, str]] = None) -> dict:
+def _write_placeholder_config(cfg_path: Path) -> None:
+    cfg_path.parent.mkdir(parents=True, exist_ok=True)
+    cfg_path.write_text(PLACEHOLDER_CONFIG_YAML, encoding="utf-8")
+
+
+def _load_config(
+    path_argument: Optional[str], placeholders: Optional[Dict[str, str]] = None
+) -> dict:
     if path_argument:
         cfg_path = Path(path_argument).expanduser()
         if not cfg_path.is_file():
-            raise FileNotFoundError(f"Config file not found: {cfg_path}")
+            _write_placeholder_config(cfg_path)
+            raise FileNotFoundError(
+                f"Config file not found. Placeholder created at: {cfg_path}"
+            )
     else:
         cfg_path = _detect_config_path()
 
@@ -159,6 +219,50 @@ def _coalesce(value, fallback):
     return value if value is not None else fallback
 
 
+def _normalize_window_configs(raw_windows: Sequence[dict]) -> List[dict]:
+    if not isinstance(raw_windows, list) or not raw_windows:
+        raise ValueError("windows must be a non-empty list")
+
+    normalized: List[dict] = []
+
+    for idx, window_cfg in enumerate(raw_windows):
+        if not isinstance(window_cfg, dict):
+            raise ValueError(f"window entry #{idx + 1} must be an object")
+
+        num_panes = window_cfg.get("num_panes")
+        if num_panes is None:
+            raise ValueError(f"window entry #{idx + 1} must define num_panes")
+        num_panes = int(num_panes)
+        if num_panes < 1:
+            raise ValueError("Number of new panes must be at least 1")
+
+        pane = window_cfg.get("pane")
+        pane_index = int(pane) if pane is not None else None
+        if pane_index is not None and (pane_index < 0 or pane_index >= num_panes):
+            raise ValueError(
+                f"pane index {pane_index} is out of range for window #{idx + 1}"
+            )
+
+        layout_arg = window_cfg.get("layout", "even-vertical")
+        layout = _normalize_layout(layout_arg)
+
+        command_batches = _normalize_commands(window_cfg.get("commands"))
+        _validate_command_panes(command_batches, num_panes, idx + 1)
+
+        normalized.append(
+            {
+                "window": window_cfg.get("window"),
+                "num_panes": num_panes,
+                "layout": layout,
+                "pane": pane_index,
+                "commands": command_batches,
+                "kill": window_cfg.get("kill"),
+            }
+        )
+
+    return normalized
+
+
 def _normalize_commands(commands: Optional[Sequence[dict]]) -> List[CommandBatch]:
     if not commands:
         return []
@@ -185,6 +289,17 @@ def _normalize_commands(commands: Optional[Sequence[dict]]) -> List[CommandBatch
         normalized.append((pane_indices, [str(cmd) for cmd in pane_commands]))
 
     return normalized
+
+
+def _validate_command_panes(
+    command_batches: List[CommandBatch], num_panes: int, window_number: int
+) -> None:
+    for pane_indices, _ in command_batches:
+        for pane_index in pane_indices:
+            if pane_index < 0 or pane_index >= num_panes:
+                raise ValueError(
+                    f"command pane index {pane_index} is out of range for window #{window_number}"
+                )
 
 
 def _parse_pane_indices(pane_spec) -> List[int]:
@@ -235,7 +350,9 @@ def main():
     raise exceptions for misuse.
     """
     parser = argparse.ArgumentParser(description="Tmux session starter")
-    parser.add_argument("-n", "--num_panes", type=int, help="Number of new panes to create")
+    parser.add_argument(
+        "-n", "--num_panes", type=int, help="Number of new panes to create"
+    )
     parser.add_argument("-s", "--session", type=str, help="Name of the tmux session")
     parser.add_argument("-w", "--window", type=str, help="Name of the tmux window")
     parser.add_argument("-p", "--pane", type=int, help="Index of the tmux pane")
@@ -246,9 +363,11 @@ def main():
         help="Layout for the tmux panes",
     )
     parser.add_argument(
-        "--kill", action="store_true", help="Kill existing tmux session with the same name before starting a new one"
+        "--kill",
+        action="store_true",
+        help="Kill existing tmux session with the same name before starting a new one",
     )
-    parser.add_argument("-c", "--config", type=str, help="Path to tmuxer JSON config file")
+    parser.add_argument("-c", "--config", type=str, help="Path to tmuxer config file")
     parser.add_argument(
         "-P",
         "--placeholder",
@@ -263,37 +382,56 @@ def main():
     placeholder_values = _parse_placeholder_args(args.placeholder)
     config = _load_config(args.config, placeholder_values)
 
-    num_panes = _coalesce(args.num_panes, config.get("num_panes"))
     session = _coalesce(args.session, config.get("session"))
-    window = _coalesce(args.window, config.get("window"))
-    pane = _coalesce(args.pane, config.get("pane"))
-    layout_arg = _coalesce(args.layout, config.get("layout", "even-vertical"))
+    raw_windows = config.get("windows")
     kill_existing = args.kill or bool(config.get("kill"))
-    command_batches = _normalize_commands(config.get("commands"))
+    if isinstance(raw_windows, list):
+        window_configs = _normalize_window_configs(raw_windows)
+        kill_existing = kill_existing or any(
+            bool(cfg.get("kill")) for cfg in window_configs
+        )
+    else:
+        num_panes = args.num_panes
+        if num_panes is None:
+            raise ValueError("num_panes must be provided via CLI or config")
+        layout_arg = _coalesce(args.layout, "even-vertical")
+        layout = _normalize_layout(layout_arg)
+        pane_index = int(args.pane) if args.pane is not None else None
+        if pane_index is not None and (pane_index < 0 or pane_index >= num_panes):
+            raise ValueError(
+                f"pane index {pane_index} is out of range for num_panes={num_panes}"
+            )
+        window_configs = [
+            {
+                "window": args.window,
+                "num_panes": int(num_panes),
+                "layout": layout,
+                "pane": pane_index,
+                "commands": [],
+                "kill": False,
+            }
+        ]
 
-    if num_panes is None:
-        raise ValueError("num_panes must be provided via CLI or config")
     if session is None:
         raise ValueError("session must be provided via CLI or config")
-
-    num_panes = int(num_panes)
-    if num_panes < 1:
-        raise ValueError("Number of new panes must be at least 1")
-
-    pane_index = int(pane) if pane is not None else None
-    layout = _normalize_layout(layout_arg)
 
     if kill_existing and session:
         # Prefer to silence output from tmux kill-session so CLI stays quiet
         os.system(f"tmux kill-session -t {session} >/dev/null 2>&1")
 
+    focus_window = 0
+    focus_pane = window_configs[0].get("pane", 0)
+    for idx, window_cfg in enumerate(window_configs):
+        if window_cfg.get("pane") is not None:
+            focus_window = idx
+            focus_pane = window_cfg.get("pane")
+            break
+
     start_tmux_session(
         session_name=session,
-        window_name=window,
-        pane_index=pane_index,
-        new_panes=num_panes,
-        layout=layout,
-        command_batches=command_batches,
+        windows=window_configs,
+        focus_window=focus_window,
+        focus_pane=focus_pane,
     )
 
 

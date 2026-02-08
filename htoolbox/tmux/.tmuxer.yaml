@@ -1,20 +1,31 @@
-session: dev-session
-window: workspace
-num_panes: 3
-layout: even-vertical
-pane: 0
-kill: true
-commands:
-  - pane_index: "0-1"
+session: tmuxer-session
+windows:
+  - window: workspace
+    num_panes: 3
+    layout: even-vertical
+    pane: 0
+    kill: true
     commands:
-      - bash
-  - pane_index: "0"
+      - pane_index: "0-1"
+        commands:
+          - bash
+      - pane_index: "0"
+        commands:
+          - bash
+          - cd /usr
+      - pane_index: "1"
+        commands:
+          - cd /bin
+      - pane_index: "2"
+        commands:
+          - htop
+  - window: logs
+    num_panes: 2
+    layout: even-horizontal
     commands:
-      - bash
-      - cd /usr
-  - pane_index: "1"
-    commands:
-      - cd /bin
-  - pane_index: "2"
-    commands:
-      - htop
+      - pane_index: "0"
+        commands:
+          - tail -f /var/log/syslog
+      - pane_index: "1"
+        commands:
+          - htop
