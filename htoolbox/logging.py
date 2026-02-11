@@ -7,11 +7,36 @@ from colorama import Fore, Style
 from rich.logging import RichHandler
 from rich.text import Text
 
-RST = Style.RESET_ALL
+BRI = Style.BRIGHT
+
+BLACK = Fore.BLACK
+RED = Fore.RED
+GREEN = Fore.GREEN
+YELLOW = Fore.YELLOW
+BLUE = Fore.BLUE
+PURPLE = Fore.MAGENTA
+CYAN = Fore.CYAN
+WHITE = Fore.WHITE
+
+BBLACK = Style.BRIGHT + Fore.BLACK
 BRED = Style.BRIGHT + Fore.RED
 BGREEN = Style.BRIGHT + Fore.GREEN
 BYELLOW = Style.BRIGHT + Fore.YELLOW
-BRI = Style.BRIGHT
+BBLUE = Style.BRIGHT + Fore.BLUE
+BPURPLE = Style.BRIGHT + Fore.MAGENTA
+BCYAN = Style.BRIGHT + Fore.CYAN
+BWHITE = Style.BRIGHT + Fore.WHITE
+
+UBLACK = Style.UNDERLINE + Fore.BLACK
+URED = Style.UNDERLINE + Fore.RED
+UGREEN = Style.UNDERLINE + Fore.GREEN
+UYELLOW = Style.UNDERLINE + Fore.YELLOW
+UBLUE = Style.UNDERLINE + Fore.BLUE
+UPURPLE = Style.UNDERLINE + Fore.MAGENTA
+UCYAN = Style.UNDERLINE + Fore.CYAN
+UWHITE = Style.UNDERLINE + Fore.WHITE
+
+RST = Style.RESET_ALL
 
 
 def print_ft(s: str = None, c: str = None, leading=10, *args, **kwargs):
