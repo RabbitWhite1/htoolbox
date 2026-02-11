@@ -3,40 +3,39 @@ import os
 import re
 from pathlib import Path
 
-from colorama import Fore, Style
 from rich.logging import RichHandler
 from rich.text import Text
 
-BRI = Style.BRIGHT
+RST = "\x1b[0m"
+BRI = "\x1b[1m"
+UND = "\x1b[4m"
 
-BLACK = Fore.BLACK
-RED = Fore.RED
-GREEN = Fore.GREEN
-YELLOW = Fore.YELLOW
-BLUE = Fore.BLUE
-PURPLE = Fore.MAGENTA
-CYAN = Fore.CYAN
-WHITE = Fore.WHITE
+BLACK = "\x1b[30m"
+RED = "\x1b[31m"
+GREEN = "\x1b[32m"
+YELLOW = "\x1b[33m"
+BLUE = "\x1b[34m"
+PURPLE = "\x1b[35m"
+CYAN = "\x1b[36m"
+WHITE = "\x1b[37m"
 
-BBLACK = Style.BRIGHT + Fore.BLACK
-BRED = Style.BRIGHT + Fore.RED
-BGREEN = Style.BRIGHT + Fore.GREEN
-BYELLOW = Style.BRIGHT + Fore.YELLOW
-BBLUE = Style.BRIGHT + Fore.BLUE
-BPURPLE = Style.BRIGHT + Fore.MAGENTA
-BCYAN = Style.BRIGHT + Fore.CYAN
-BWHITE = Style.BRIGHT + Fore.WHITE
+BBLACK = "\x1b[1;30m"
+BRED = "\x1b[1;31m"
+BGREEN = "\x1b[1;32m"
+BYELLOW = "\x1b[1;33m"
+BBLUE = "\x1b[1;34m"
+BPURPLE = "\x1b[1;35m"
+BCYAN = "\x1b[1;36m"
+BWHITE = "\x1b[1;37m"
 
-UBLACK = Style.UNDERLINE + Fore.BLACK
-URED = Style.UNDERLINE + Fore.RED
-UGREEN = Style.UNDERLINE + Fore.GREEN
-UYELLOW = Style.UNDERLINE + Fore.YELLOW
-UBLUE = Style.UNDERLINE + Fore.BLUE
-UPURPLE = Style.UNDERLINE + Fore.MAGENTA
-UCYAN = Style.UNDERLINE + Fore.CYAN
-UWHITE = Style.UNDERLINE + Fore.WHITE
-
-RST = Style.RESET_ALL
+UBLACK = "\x1b[4;30m"
+URED = "\x1b[4;31m"
+UGREEN = "\x1b[4;32m"
+UYELLOW = "\x1b[4;33m"
+UBLUE = "\x1b[4;34m"
+UPURPLE = "\x1b[4;35m"
+UCYAN = "\x1b[4;36m"
+UWHITE = "\x1b[4;37m"
 
 
 def print_ft(s: str = None, c: str = None, leading=10, *args, **kwargs):
