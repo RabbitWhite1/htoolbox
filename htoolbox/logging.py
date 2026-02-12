@@ -135,12 +135,19 @@ def init_global_logger(
     show_path: bool = False,
     enable_rich: bool = True,
     # For file logging
-    file_level: int = logging.NOTSET,
+    file_level: int = logging.INFO,
     mode: str = "w",
     path: Path = None,
     file_time_format: str = "%Y/%m/%d %H:%M:%S",
     file_format: str = "%(asctime)s %(levelname)s %(message)s",
+    file_shadow_ansi: bool = True,
 ):
+    """
+    Docstring for init_global_logger
+
+    :param file_shadow_ansi: If path provided, and this is True, we will
+    create a shadow log file without ANSI stripped.
+    """
     global LOGGER
     logger = logging.getLogger(name)
     lowest_level = min(console_level, file_level)
@@ -170,6 +177,15 @@ def init_global_logger(
         )
         file_handler.setLevel(file_level)
         logger.addHandler(file_handler)
+        if file_shadow_ansi:
+            shadow_path = path.with_suffix(".ansi" + path.suffix)
+            print(shadow_path)
+            shadow_handler = logging.FileHandler(shadow_path, mode)
+            shadow_handler.setFormatter(
+                logging.Formatter(fmt=file_format, datefmt=file_time_format)
+            )
+            shadow_handler.setLevel(file_level)
+            logger.addHandler(shadow_handler)
     LOGGER = logger
     return LOGGER
 
