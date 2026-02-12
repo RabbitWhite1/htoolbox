@@ -24,12 +24,14 @@ CONFIG_CANDIDATES = (
     ".tmuxer.yaml",
     ".tmuxer.yml",
 )
-PLACEHOLDER_CONFIG_YAML = """session: tmuxer-session
+PLACEHOLDER_CONFIG_YAML = """# An example tmuxer config file.
+session: tmuxer-session
+focus_window: 0
 windows:
     - window: workspace
       num_panes: 3
       layout: even-vertical
-      pane: 0
+      focus_pane: 0
       kill: true
       commands:
           - pane_index: "0-1"
@@ -98,13 +100,94 @@ def start_tmux_session(
             command_batches=command_batches,
         )
 
-    # Select the specified pane if provided
-    os.system(f"tmux select-window -t {session_name}:{focus_window}")
-    if focus_pane is not None:
-        os.system(f"tmux select-pane -t {session_name}:{focus_window}.{focus_pane}")
+        # Select the window's focus pane after setup
+        window_focus_pane = int(window_cfg.get("focus_pane", 0))
+        os.system(f"tmux select-pane -t {window_target}.{window_focus_pane}")
+
+    # Select the specified pane/window focus
+    os.system(f"tmux select-pane -t {session_name}:{focus_window}.{focus_pane}")
 
     # Attach to the tmux session
+    if os.environ.get("TMUX"):
+        rich.print(
+            "[yellow]Detected existing tmux session ($TMUX is set).[/yellow] "
+            "New session was created but auto-attach is skipped to keep your current tmux context. "
+            f"To force attach later, run: [bold]unset TMUX && tmux attach-session -t {session_name}[/bold]"
+        )
+        return
     os.system(f"tmux attach-session -t {session_name}")
+
+
+def _prepare_session_from_config(
+    config: dict,
+    *,
+    session_override: Optional[str] = None,
+    kill_override: bool = False,
+) -> tuple[str, List[dict], bool, int, int]:
+    if not isinstance(config, dict):
+        raise ValueError("config must be a dict")
+
+    session = _coalesce(session_override, config.get("session"))
+    if not session or not isinstance(session, str):
+        raise ValueError("session must be a non-empty string")
+
+    raw_windows = config.get("windows")
+    if not isinstance(raw_windows, list) or not raw_windows:
+        raise ValueError("windows must be a non-empty list")
+
+    window_configs = _normalize_window_configs(raw_windows)
+
+    kill_existing = (
+        bool(kill_override)
+        or bool(config.get("kill"))
+        or any(bool(cfg.get("kill")) for cfg in window_configs)
+    )
+
+    focus_window = int(config.get("focus_window", 0))
+    if focus_window < 0 or focus_window >= len(window_configs):
+        raise ValueError("focus_window is out of range")
+
+    focus_pane = int(window_configs[focus_window].get("focus_pane", 0))
+
+    return session, window_configs, kill_existing, focus_window, focus_pane
+
+
+def run_with_config(config: dict) -> None:
+    """Run tmuxer with a config dict.
+
+    Expected schema (same as file config):
+    {
+        "session": "name",                       # required
+        "focus_window": 0,                        # optional
+        "kill": true|false,                      # optional
+        "windows": [                             # required
+            {
+                "window": "optional window name",
+                "num_panes": 3,                  # required
+                "layout": "even-vertical",      # optional (default: even-vertical)
+                "focus_pane": 0,                 # optional focus pane within this window
+                "kill": true|false,              # optional, contributes to kill behavior
+                "commands": [                    # optional
+                    {"pane_index": "0-1", "commands": ["bash"]},
+                ],
+            }
+        ],
+    }
+    """
+
+    session, window_configs, kill_existing, focus_window, focus_pane = (
+        _prepare_session_from_config(config)
+    )
+
+    if kill_existing:
+        os.system(f"tmux kill-session -t {session} >/dev/null 2>&1")
+
+    start_tmux_session(
+        session_name=session,
+        windows=window_configs,
+        focus_window=focus_window,
+        focus_pane=focus_pane,
+    )
 
 
 def _normalize_layout(layout_arg: str) -> str:
@@ -236,11 +319,11 @@ def _normalize_window_configs(raw_windows: Sequence[dict]) -> List[dict]:
         if num_panes < 1:
             raise ValueError("Number of new panes must be at least 1")
 
-        pane = window_cfg.get("pane")
-        pane_index = int(pane) if pane is not None else None
-        if pane_index is not None and (pane_index < 0 or pane_index >= num_panes):
+        focus_pane = window_cfg.get("focus_pane")
+        focus_pane_index = int(focus_pane) if focus_pane is not None else 0
+        if focus_pane_index < 0 or focus_pane_index >= num_panes:
             raise ValueError(
-                f"pane index {pane_index} is out of range for window #{idx + 1}"
+                f"focus_pane index {focus_pane_index} is out of range for window #{idx + 1}"
             )
 
         layout_arg = window_cfg.get("layout", "even-vertical")
@@ -254,7 +337,7 @@ def _normalize_window_configs(raw_windows: Sequence[dict]) -> List[dict]:
                 "window": window_cfg.get("window"),
                 "num_panes": num_panes,
                 "layout": layout,
-                "pane": pane_index,
+                "focus_pane": focus_pane_index,
                 "commands": command_batches,
                 "kill": window_cfg.get("kill"),
             }
@@ -376,56 +459,31 @@ def main():
         default=[],
         help="Define placeholder substitutions for config files; repeatable",
     )
+    parser.add_argument(
+        "--dry",
+        action="store_true",
+        help="Load and print config, then exit without starting tmux",
+    )
 
     args = parser.parse_args()
 
     placeholder_values = _parse_placeholder_args(args.placeholder)
     config = _load_config(args.config, placeholder_values)
 
-    session = _coalesce(args.session, config.get("session"))
-    raw_windows = config.get("windows")
-    kill_existing = args.kill or bool(config.get("kill"))
-    if isinstance(raw_windows, list):
-        window_configs = _normalize_window_configs(raw_windows)
-        kill_existing = kill_existing or any(
-            bool(cfg.get("kill")) for cfg in window_configs
+    if args.dry:
+        return
+
+    session, window_configs, kill_existing, focus_window, focus_pane = (
+        _prepare_session_from_config(
+            config,
+            session_override=args.session,
+            kill_override=bool(args.kill),
         )
-    else:
-        num_panes = args.num_panes
-        if num_panes is None:
-            raise ValueError("num_panes must be provided via CLI or config")
-        layout_arg = _coalesce(args.layout, "even-vertical")
-        layout = _normalize_layout(layout_arg)
-        pane_index = int(args.pane) if args.pane is not None else None
-        if pane_index is not None and (pane_index < 0 or pane_index >= num_panes):
-            raise ValueError(
-                f"pane index {pane_index} is out of range for num_panes={num_panes}"
-            )
-        window_configs = [
-            {
-                "window": args.window,
-                "num_panes": int(num_panes),
-                "layout": layout,
-                "pane": pane_index,
-                "commands": [],
-                "kill": False,
-            }
-        ]
+    )
 
-    if session is None:
-        raise ValueError("session must be provided via CLI or config")
-
-    if kill_existing and session:
+    if kill_existing:
         # Prefer to silence output from tmux kill-session so CLI stays quiet
         os.system(f"tmux kill-session -t {session} >/dev/null 2>&1")
-
-    focus_window = 0
-    focus_pane = window_configs[0].get("pane", 0)
-    for idx, window_cfg in enumerate(window_configs):
-        if window_cfg.get("pane") is not None:
-            focus_window = idx
-            focus_pane = window_cfg.get("pane")
-            break
 
     start_tmux_session(
         session_name=session,
