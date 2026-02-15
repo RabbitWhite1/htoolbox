@@ -49,6 +49,15 @@ run_and_echo() {
 	exec "$@"
 }
 
+has_wrap_arg() {
+	for arg in "$@"; do
+		if [[ "${arg}" == "--wrap" || "${arg}" == --wrap=* ]]; then
+			return 0
+		fi
+	done
+	return 1
+}
+
 subcommand="${1-}"
 
 case "${subcommand}" in
@@ -81,7 +90,11 @@ case "${subcommand}" in
 				exit 0
 				;;
 			*)
-				run_and_echo sbatch "$@" --wrap "hostname && sleep infinity"
+				if has_wrap_arg "$@"; then
+					run_and_echo sbatch "$@"
+				else
+					run_and_echo sbatch "$@" --wrap "hostname && sleep infinity"
+				fi
 				;;
 		esac
 		;;

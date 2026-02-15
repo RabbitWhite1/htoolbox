@@ -55,6 +55,7 @@ def start_tmux_session(
     windows,
     focus_window=0,
     focus_pane=0,
+    detach: bool = False,
 ):
     """Start and attach to a tmux session.
 
@@ -78,15 +79,24 @@ def start_tmux_session(
                 os.system(f"tmux new-session -d -s {session_name}")
         else:
             if window_name:
-                os.system(f"tmux new-window -t {session_name} -n {window_name}")
+                if detach:
+                    os.system(f"tmux new-window -d -t {session_name} -n {window_name}")
+                else:
+                    os.system(f"tmux new-window -t {session_name} -n {window_name}")
             else:
-                os.system(f"tmux new-window -t {session_name}")
+                if detach:
+                    os.system(f"tmux new-window -d -t {session_name}")
+                else:
+                    os.system(f"tmux new-window -t {session_name}")
 
         window_target = f"{session_name}:{window_index}"
 
         # Create new panes if specified
         for _ in range(1, new_panes):
-            os.system(f"tmux split-window -t {window_target}")
+            if detach:
+                os.system(f"tmux split-window -d -t {window_target}")
+            else:
+                os.system(f"tmux split-window -t {window_target}")
             os.system(f"tmux select-layout -t {window_target} {layout}")
 
         for pane_index in range(new_panes):
@@ -101,11 +111,16 @@ def start_tmux_session(
         )
 
         # Select the window's focus pane after setup
-        window_focus_pane = int(window_cfg.get("focus_pane", 0))
-        os.system(f"tmux select-pane -t {window_target}.{window_focus_pane}")
+        if not detach:
+            window_focus_pane = int(window_cfg.get("focus_pane", 0))
+            os.system(f"tmux select-pane -t {window_target}.{window_focus_pane}")
 
     # Select the specified pane/window focus
-    os.system(f"tmux select-pane -t {session_name}:{focus_window}.{focus_pane}")
+    if not detach:
+        os.system(f"tmux select-pane -t {session_name}:{focus_window}.{focus_pane}")
+
+    if detach:
+        return
 
     # Attach to the tmux session
     if os.environ.get("TMUX"):
@@ -187,6 +202,7 @@ def run_with_config(config: dict) -> None:
         windows=window_configs,
         focus_window=focus_window,
         focus_pane=focus_pane,
+        detach=False,
     )
 
 
@@ -464,6 +480,12 @@ def main():
         action="store_true",
         help="Load and print config, then exit without starting tmux",
     )
+    parser.add_argument(
+        "-d",
+        "--detach",
+        action="store_true",
+        help="Create and configure tmux session in detached mode without attaching",
+    )
 
     args = parser.parse_args()
 
@@ -490,6 +512,7 @@ def main():
         windows=window_configs,
         focus_window=focus_window,
         focus_pane=focus_pane,
+        detach=bool(args.detach),
     )
 
 
