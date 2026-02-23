@@ -3,7 +3,7 @@ windows:
   - window: workspace
     num_panes: 3
     layout: even-vertical
-    pane: 0
+    focus_pane: 0
     kill: true
     commands:
       - pane_index: "0-1"

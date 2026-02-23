@@ -14,6 +14,8 @@ import json5
 import rich
 import yaml
 
+from .config import SessionConfig
+
 CommandBatch = Tuple[list[int], list[str]]
 LAYOUT_ALIASES = {
     "eh": "even-horizontal",
@@ -332,23 +334,25 @@ class Service:
 
     def start_tmux_session(
         self,
-        session_name,
-        windows,
-        focus_window=0,
-        focus_pane=0,
+        config: SessionConfig,
         detach: bool = True,
     ):
         """Start and optionally attach to a tmux session."""
+        session_name = config.session
+        windows = config.windows
+        focus_window = config.focus_window
+        focus_pane = config.windows[focus_window].focus_pane
+
         if not windows:
             raise ValueError("At least one window must be provided")
 
         created_windows: list[Window] = []
 
         for window_index, window_cfg in enumerate(windows):
-            window_name = window_cfg.get("window")
-            new_panes = window_cfg["num_panes"]
-            layout = window_cfg["layout"]
-            command_batches = window_cfg.get("commands")
+            window_name = window_cfg.window
+            new_panes = window_cfg.num_panes
+            layout = window_cfg.layout
+            command_batches = window_cfg.commands
 
             if window_index == 0:
                 session = self.new_session(
@@ -387,7 +391,7 @@ class Service:
 
             # Select the window's focus pane after setup
             if not detach:
-                window_focus_pane = int(window_cfg.get("focus_pane", 0))
+                window_focus_pane = int(window_cfg.focus_pane)
                 window.pane_by_index(window_focus_pane, refresh=True).select()
 
         # Select the specified pane/window focus
@@ -421,114 +425,22 @@ class Service:
         return "\n".join(items)
 
 
-def start_tmux_session(
-    session_name,
-    windows,
-    focus_window=0,
-    focus_pane=0,
-    detach: bool = True,
-    service: Optional[Service] = None,
-):
-    """Start and attach to a tmux session.
-
-    This function uses the `tmux` command-line tool. It is designed to be
-    called from the CLI entry point `main()` below, but can also be imported
-    and used programmatically.
-    """
-    runtime_service = service or Service()
-    runtime_service.start_tmux_session(
-        session_name=session_name,
-        windows=windows,
-        focus_window=focus_window,
-        focus_pane=focus_pane,
-        detach=detach,
-    )
-
-
-def _prepare_session_from_config(
+def _build_session_config(
     config: dict,
     *,
     session_override: Optional[str] = None,
     kill_override: bool = False,
-) -> tuple[str, list[dict], bool, int, int]:
+) -> SessionConfig:
     if not isinstance(config, dict):
         raise ValueError("config must be a dict")
 
-    session = _coalesce(session_override, config.get("session"))
-    if not session or not isinstance(session, str):
-        raise ValueError("session must be a non-empty string")
+    effective_config = dict(config)
+    if session_override is not None:
+        effective_config["session"] = session_override
+    if kill_override:
+        effective_config["kill"] = True
 
-    raw_windows = config.get("windows")
-    if not isinstance(raw_windows, list) or not raw_windows:
-        raise ValueError("windows must be a non-empty list")
-
-    window_configs = _normalize_window_configs(raw_windows)
-
-    kill_existing = (
-        bool(kill_override)
-        or bool(config.get("kill"))
-        or any(bool(cfg.get("kill")) for cfg in window_configs)
-    )
-
-    focus_window = int(config.get("focus_window", 0))
-    if focus_window < 0 or focus_window >= len(window_configs):
-        raise ValueError("focus_window is out of range")
-
-    focus_pane = int(window_configs[focus_window].get("focus_pane", 0))
-
-    return session, window_configs, kill_existing, focus_window, focus_pane
-
-
-def run_with_config(config: dict) -> None:
-    """Run tmuxer with a config dict.
-
-    Expected schema (same as file config):
-    {
-        "session": "name",                       # required
-        "focus_window": 0,                        # optional
-        "kill": true|false,                      # optional
-        "windows": [                             # required
-            {
-                "window": "optional window name",
-                "num_panes": 3,                  # required
-                "layout": "even-vertical",      # optional (default: even-vertical)
-                "focus_pane": 0,                 # optional focus pane within this window
-                "kill": true|false,              # optional, contributes to kill behavior
-                "commands": [                    # optional
-                    {"pane_index": "0-1", "commands": ["bash"]},
-                ],
-            }
-        ],
-    }
-    """
-
-    session, window_configs, kill_existing, focus_window, focus_pane = (
-        _prepare_session_from_config(config)
-    )
-
-    service = Service()
-
-    if kill_existing:
-        existing_session = service.get_session(session)
-        if existing_session is not None:
-            existing_session.kill(quiet=True)
-
-    service.start_tmux_session(
-        session_name=session,
-        windows=window_configs,
-        focus_window=focus_window,
-        focus_pane=focus_pane,
-        detach=False,
-    )
-
-
-def _normalize_layout(layout_arg: str) -> str:
-    v = str(layout_arg).lower().strip()
-    if v in LAYOUT_ALIASES:
-        return LAYOUT_ALIASES[v]
-    if v in LAYOUT_ALIASES.values():
-        return v
-    raise ValueError("layout must be one of: " + ", ".join(sorted(LAYOUT_OPTIONS)))
+    return SessionConfig.model_validate(effective_config)
 
 
 def _write_placeholder_config(cfg_path: Path) -> None:
@@ -611,134 +523,6 @@ def _parse_placeholder_args(raw_values: Optional[Sequence[str]]) -> Dict[str, st
     return placeholders
 
 
-def _coalesce(value, fallback):
-    return value if value is not None else fallback
-
-
-def _normalize_window_configs(raw_windows: Sequence[dict]) -> list[dict]:
-    if not isinstance(raw_windows, list) or not raw_windows:
-        raise ValueError("windows must be a non-empty list")
-
-    normalized: list[dict] = []
-
-    for idx, window_cfg in enumerate(raw_windows):
-        if not isinstance(window_cfg, dict):
-            raise ValueError(f"window entry #{idx + 1} must be an object")
-
-        num_panes = window_cfg.get("num_panes")
-        if num_panes is None:
-            raise ValueError(f"window entry #{idx + 1} must define num_panes")
-        num_panes = int(num_panes)
-        if num_panes < 1:
-            raise ValueError("Number of new panes must be at least 1")
-
-        focus_pane = window_cfg.get("focus_pane")
-        focus_pane_index = int(focus_pane) if focus_pane is not None else 0
-        if focus_pane_index < 0 or focus_pane_index >= num_panes:
-            raise ValueError(
-                f"focus_pane index {focus_pane_index} is out of range for window #{idx + 1}"
-            )
-
-        layout_arg = window_cfg.get("layout", "even-vertical")
-        layout = _normalize_layout(layout_arg)
-
-        command_batches = _normalize_commands(window_cfg.get("commands"))
-        _validate_command_panes(command_batches, num_panes, idx + 1)
-
-        normalized.append(
-            {
-                "window": window_cfg.get("window"),
-                "num_panes": num_panes,
-                "layout": layout,
-                "focus_pane": focus_pane_index,
-                "commands": command_batches,
-                "kill": window_cfg.get("kill"),
-            }
-        )
-
-    return normalized
-
-
-def _normalize_commands(commands: Optional[Sequence[dict]]) -> list[CommandBatch]:
-    if not commands:
-        return []
-
-    if not isinstance(commands, list):
-        raise ValueError("commands section must be a list of command blocks")
-
-    normalized: list[CommandBatch] = []
-
-    for idx, block in enumerate(commands):
-        if not isinstance(block, dict):
-            raise ValueError(f"Command block #{idx + 1} must be a JSON object")
-
-        pane_spec = block.get("pane_index")
-        if pane_spec is None:
-            raise ValueError("Each command block requires a pane_index")
-
-        pane_indices = _parse_pane_indices(pane_spec)
-
-        pane_commands = block.get("commands")
-        if not isinstance(pane_commands, list):
-            raise ValueError("commands list must be a list.")
-
-        normalized.append((pane_indices, [str(cmd) for cmd in pane_commands]))
-
-    return normalized
-
-
-def _validate_command_panes(
-    command_batches: list[CommandBatch], num_panes: int, window_number: int
-) -> None:
-    for pane_indices, _ in command_batches:
-        for pane_index in pane_indices:
-            if pane_index < 0 or pane_index >= num_panes:
-                raise ValueError(
-                    f"command pane index {pane_index} is out of range for window #{window_number}"
-                )
-
-
-def _parse_pane_indices(pane_spec) -> list[int]:
-    if isinstance(pane_spec, int):
-        return [pane_spec]
-
-    if isinstance(pane_spec, list):
-        if not pane_spec:
-            raise ValueError("pane_index arrays cannot be empty")
-        parsed = []
-        for pane_value in pane_spec:
-            if not isinstance(pane_value, int):
-                raise ValueError("pane_index entries must be integers")
-            parsed.append(pane_value)
-        return sorted(set(parsed))
-
-    if isinstance(pane_spec, str):
-        pane_spec = pane_spec.strip()
-        if not pane_spec:
-            raise ValueError("pane_index string cannot be empty")
-
-        segments = [seg.strip() for seg in pane_spec.split(",") if seg.strip()]
-        indices: list[int] = []
-        for segment in segments:
-            if "-" in segment:
-                parts = segment.split("-", 1)
-                if len(parts) != 2 or not parts[0] or not parts[1]:
-                    raise ValueError(f"Invalid pane range '{segment}'")
-                start = int(parts[0])
-                end = int(parts[1])
-                if start > end:
-                    raise ValueError(f"pane range start must be <= end in '{segment}'")
-                indices.extend(list(range(start, end + 1)))
-            else:
-                indices.append(int(segment))
-
-        if not indices:
-            raise ValueError("pane_index string must resolve to at least one pane")
-        return sorted(set(indices))
-
-    raise ValueError("pane_index must be int, list of ints, or a string specification")
-
-
 def main():
     """Console entry point for the `tmuxer` command.
 
@@ -789,30 +573,28 @@ def main():
     placeholder_values = _parse_placeholder_args(args.placeholder)
     config = _load_config(args.config, placeholder_values)
 
+    session_config = _build_session_config(
+        config,
+        session_override=args.session,
+        kill_override=bool(args.kill),
+    )
+    kill_existing = bool(session_config.kill) or any(
+        bool(window.kill) for window in session_config.windows
+    )
+
     if args.dry:
         return
-
-    session, window_configs, kill_existing, focus_window, focus_pane = (
-        _prepare_session_from_config(
-            config,
-            session_override=args.session,
-            kill_override=bool(args.kill),
-        )
-    )
 
     service = Service()
 
     if kill_existing:
         # Prefer to silence output from tmux kill-session so CLI stays quiet
-        existing_session = service.get_session(session)
+        existing_session = service.get_session(session_config.session)
         if existing_session is not None:
             existing_session.kill(quiet=True)
 
     service.start_tmux_session(
-        session_name=session,
-        windows=window_configs,
-        focus_window=focus_window,
-        focus_pane=focus_pane,
+        config=session_config,
         detach=bool(args.detach),
     )
 
