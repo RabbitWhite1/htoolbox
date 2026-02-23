@@ -14,7 +14,7 @@ dependencies = [
 ]
 
 [project.scripts]
-tmuxer = "htoolbox.tmux.tmuxer:main"
+tmuxer = "htoolbox.tmuxer.tmuxer:main"
 vd = "htoolbox.downloader.vd:main"
 
 [build-system]
@@ -23,9 +23,9 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
 script-files = [
-    "htoolbox/vscode/codeit", 
+    "htoolbox/vscode/codeit",
     "htoolbox/hscan",
-    "htoolbox/singularity/smagic"
+    "htoolbox/singularity/smagic",
 ]
 
 [tool.setuptools.packages.find]
