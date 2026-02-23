@@ -135,6 +135,19 @@ class Window:
                 return pane
         raise ValueError(f"pane index {pane_index} not found in window {self.name}")
 
+    def kill(self, quiet: bool = True) -> None:
+        """Kill this tmux window."""
+        cmd = ["kill-window", "-t", f"@{self.uid}"]
+        if quiet:
+            tmux_run(
+                cmd,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        else:
+            tmux_run(cmd)
+        self.service.refresh()
+
     def __repr__(self):
         return f"{self.name}@{self.uid}"
 
@@ -189,6 +202,15 @@ class Session:
             if window.uid == window_uid:
                 return window
         raise ValueError(f"window uid {window_uid} not found in session {self.name}")
+
+    def window_by_name(
+        self, window_name: str, refresh: bool = True
+    ) -> Optional[Window]:
+        """Return a window in this session by window name."""
+        for window in self.windows(refresh=refresh):
+            if window.name == window_name:
+                return window
+        return None
 
     def attach(self) -> None:
         """Attach to this tmux session."""
@@ -332,12 +354,30 @@ class Service:
                 return s
         raise RuntimeError("Failed to create new session")
 
-    def start_tmux_session(
+    def start_session_from_config(
         self,
         config: SessionConfig,
         detach: bool = True,
     ):
         """Start and optionally attach to a tmux session."""
+        # Try kill if required.
+        existing_session = self.get_session(config.session)
+        if existing_session is not None:
+            if config.kill:
+                existing_session.kill(quiet=True)
+            else:
+                for window_cfg in config.windows:
+                    if not window_cfg.kill:
+                        continue
+                    if not window_cfg.window:
+                        # window name is not specified, don't kill
+                        continue
+                    window = existing_session.window_by_name(window_cfg.window)
+                    if window is None:
+                        continue
+                    window.kill(quiet=True)
+
+        # Create the session
         session_name = config.session
         windows = config.windows
         focus_window = config.focus_window
@@ -448,33 +488,6 @@ def _write_placeholder_config(cfg_path: Path) -> None:
     cfg_path.write_text(PLACEHOLDER_CONFIG_YAML, encoding="utf-8")
 
 
-def _load_config(
-    path_argument: Optional[str], placeholders: Optional[Dict[str, str]] = None
-) -> dict:
-    if path_argument:
-        cfg_path = Path(path_argument).expanduser()
-        if not cfg_path.is_file():
-            _write_placeholder_config(cfg_path)
-            raise FileNotFoundError(
-                f"Config file not found. Placeholder created at: {cfg_path}"
-            )
-    else:
-        cfg_path = _detect_config_path()
-
-    if not cfg_path:
-        return {}
-
-    data = _parse_config_file(cfg_path, placeholders or {})
-
-    if not isinstance(data, dict):
-        raise ValueError("Top-level structure in config must be an object")
-
-    rich.print("Using tmuxer config from ", cfg_path)
-    rich.print(data)
-
-    return data
-
-
 def _detect_config_path() -> Optional[Path]:
     cwd = Path.cwd()
     for filename in CONFIG_CANDIDATES:
@@ -484,9 +497,9 @@ def _detect_config_path() -> Optional[Path]:
     return None
 
 
-def _parse_config_file(cfg_path: Path, placeholders: Dict[str, str]):
-    suffix = cfg_path.suffix.lower()
-    with cfg_path.open("r", encoding="utf-8") as handle:
+def _load_config(config: Path, placeholders: Dict[str, str]):
+    suffix = config.suffix.lower()
+    with config.open("r", encoding="utf-8") as handle:
         contents = handle.read()
 
     rendered = _apply_placeholders(contents, placeholders)
@@ -521,6 +534,46 @@ def _parse_placeholder_args(raw_values: Optional[Sequence[str]]) -> Dict[str, st
         placeholders[name] = value
 
     return placeholders
+
+
+def session_config_from_args(args: argparse.Namespace) -> SessionConfig:
+    if args.config is None:
+        if not args.session:
+            raise ValueError("--session is required when --config is not provided")
+
+        config = {
+            "session": args.session,
+            "focus_window": 0,
+            "kill": bool(args.kill),
+            "windows": [
+                {
+                    "window": args.window,
+                    "num_panes": args.num_panes if args.num_panes is not None else 1,
+                    "layout": (
+                        args.layout if args.layout is not None else "even-vertical"
+                    ),
+                    "focus_pane": args.pane if args.pane is not None else 0,
+                    "commands": [],
+                    "kill": bool(args.kill),
+                }
+            ],
+        }
+        session_config = SessionConfig.model_validate(config)
+    else:
+        placeholder_values = _parse_placeholder_args(args.placeholder)
+        config = _load_config(args.config, placeholder_values)
+
+        session_config = _build_session_config(
+            config,
+            session_override=args.session,
+            kill_override=bool(args.kill),
+        )
+
+        rich.print("Using tmuxer config from ", Path(args.config).expanduser())
+
+    rich.print(session_config)
+
+    return session_config
 
 
 def main():
@@ -570,33 +623,24 @@ def main():
 
     args = parser.parse_args()
 
-    placeholder_values = _parse_placeholder_args(args.placeholder)
-    config = _load_config(args.config, placeholder_values)
+    if args.config is None:
+        args.config = _detect_config_path()
+    else:
+        args.config = Path(args.config).expanduser()
+        if not args.config.is_file():
+            _write_placeholder_config(args.config)
+            raise FileNotFoundError(
+                f"Config file not found. Placeholder created at: {args.config}"
+            )
 
-    session_config = _build_session_config(
-        config,
-        session_override=args.session,
-        kill_override=bool(args.kill),
-    )
-    kill_existing = bool(session_config.kill) or any(
-        bool(window.kill) for window in session_config.windows
-    )
+    session_config = session_config_from_args(args)
 
     if args.dry:
+        rich.print("Exiting since --dry specified.")
         return
 
     service = Service()
-
-    if kill_existing:
-        # Prefer to silence output from tmux kill-session so CLI stays quiet
-        existing_session = service.get_session(session_config.session)
-        if existing_session is not None:
-            existing_session.kill(quiet=True)
-
-    service.start_tmux_session(
-        config=session_config,
-        detach=bool(args.detach),
-    )
+    service.start_session_from_config(config=session_config, detach=bool(args.detach))
 
 
 if __name__ == "__main__":
