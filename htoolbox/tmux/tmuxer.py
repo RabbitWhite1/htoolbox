@@ -2,6 +2,7 @@ import argparse
 import os
 import os.path as osp
 import shlex
+import subprocess
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
 
@@ -74,35 +75,34 @@ def start_tmux_session(
 
         if window_index == 0:
             if window_name:
-                os.system(f"tmux new-session -d -s {session_name} -n {window_name}")
+                subprocess.run(
+                    ["tmux", "new-session", "-d", "-s", session_name, "-n", window_name]
+                )
             else:
-                os.system(f"tmux new-session -d -s {session_name}")
+                subprocess.run(["tmux", "new-session", "-d", "-s", session_name])
         else:
             if window_name:
-                if detach:
-                    os.system(f"tmux new-window -d -t {session_name} -n {window_name}")
-                else:
-                    os.system(f"tmux new-window -t {session_name} -n {window_name}")
+                subprocess.run(
+                    ["tmux", "new-window", "-d", "-t", session_name, "-n", window_name]
+                )
             else:
-                if detach:
-                    os.system(f"tmux new-window -d -t {session_name}")
-                else:
-                    os.system(f"tmux new-window -t {session_name}")
+                subprocess.run(["tmux", "new-window", "-d", "-t", session_name])
 
         window_target = f"{session_name}:{window_index}"
 
         # Create new panes if specified
         for _ in range(1, new_panes):
-            if detach:
-                os.system(f"tmux split-window -d -t {window_target}")
-            else:
-                os.system(f"tmux split-window -t {window_target}")
-            os.system(f"tmux select-layout -t {window_target} {layout}")
+            subprocess.run(["tmux", "split-window", "-d", "-t", window_target])
+            subprocess.run(["tmux", "select-layout", "-t", window_target, layout])
 
-        for pane_index in range(new_panes):
-            os.system(
-                f"tmux send-keys -t {window_target}.{pane_index} 'export IID={pane_index}' C-m"
-            )
+        _send_commands_to_panes(
+            session_name=session_name,
+            window_index=window_index,
+            command_batches=[
+                ([pane_index], [f"export IID={pane_index}"])
+                for pane_index in range(new_panes)
+            ],
+        )
 
         _send_commands_to_panes(
             session_name=session_name,
@@ -113,11 +113,14 @@ def start_tmux_session(
         # Select the window's focus pane after setup
         if not detach:
             window_focus_pane = int(window_cfg.get("focus_pane", 0))
-            os.system(f"tmux select-pane -t {window_target}.{window_focus_pane}")
+            subprocess.run(
+                ["tmux", "select-pane", "-t", f"{window_target}.{window_focus_pane}"]
+            )
 
     # Select the specified pane/window focus
-    if not detach:
-        os.system(f"tmux select-pane -t {session_name}:{focus_window}.{focus_pane}")
+    subprocess.run(
+        ["tmux", "select-pane", "-t", f"{session_name}:{focus_window}.{focus_pane}"]
+    )
 
     if detach:
         return
@@ -130,7 +133,7 @@ def start_tmux_session(
             f"To force attach later, run: [bold]unset TMUX && tmux attach-session -t {session_name}[/bold]"
         )
         return
-    os.system(f"tmux attach-session -t {session_name}")
+    subprocess.run(["tmux", "attach-session", "-t", session_name])
 
 
 def _prepare_session_from_config(
@@ -195,7 +198,11 @@ def run_with_config(config: dict) -> None:
     )
 
     if kill_existing:
-        os.system(f"tmux kill-session -t {session} >/dev/null 2>&1")
+        subprocess.run(
+            ["tmux", "kill-session", "-t", session],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
 
     start_tmux_session(
         session_name=session,
@@ -229,8 +236,15 @@ def _send_commands_to_panes(
     for pane_indices, pane_commands in command_batches:
         for pane_index in pane_indices:
             for cmd in pane_commands:
-                os.system(
-                    f"tmux send-keys -t {window_target}.{pane_index} {shlex.quote(cmd)} C-m"
+                subprocess.run(
+                    [
+                        "tmux",
+                        "send-keys",
+                        "-t",
+                        f"{window_target}.{pane_index}",
+                        cmd,
+                        "C-m",
+                    ]
                 )
 
 
@@ -505,7 +519,11 @@ def main():
 
     if kill_existing:
         # Prefer to silence output from tmux kill-session so CLI stays quiet
-        os.system(f"tmux kill-session -t {session} >/dev/null 2>&1")
+        subprocess.run(
+            ["tmux", "kill-session", "-t", session],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
 
     start_tmux_session(
         session_name=session,

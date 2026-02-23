@@ -1,4 +1,4 @@
-session: tmuxer-session
+session: tmuxer-example
 windows:
   - window: workspace
     num_panes: 3
