@@ -95,6 +95,7 @@ class Pane:
 
     def select(self) -> None:
         """Select this pane as active."""
+        print(f"Focus on @{self.window.name} %{self.uid}")
         tmux_run(["select-pane", "-t", f"%{self.uid}"])
 
 
@@ -127,6 +128,11 @@ class Window:
         """Set the layout of panes in a tmux window."""
         target = f"{self.session.name}:{self.name}"
         tmux_run(["select-layout", "-t", target, layout])
+
+    def select(self) -> None:
+        """Select this window as active."""
+        print(f"Focus on @{self.name}")
+        tmux_run(["select-window", "-t", f"@{self.uid}"])
 
     def pane_by_index(self, pane_index: int, refresh: bool = True) -> Pane:
         """Return a pane in this window by its tmux pane index."""
@@ -430,14 +436,13 @@ class Service:
                             pane.send_keys(cmd)
 
             # Select the window's focus pane after setup
-            if not detach:
-                window_focus_pane = int(window_cfg.focus_pane)
-                window.pane_by_index(window_focus_pane, refresh=True).select()
+            window_focus_pane = int(window_cfg.focus_pane)
+            window.pane_by_index(window_focus_pane, refresh=True).select()
 
         # Select the specified pane/window focus
         if focus_window < 0 or focus_window >= len(created_windows):
             raise ValueError("focus_window is out of range")
-        created_windows[focus_window].pane_by_index(focus_pane, refresh=True).select()
+        created_windows[focus_window].select()
 
         if detach:
             return

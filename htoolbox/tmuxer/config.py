@@ -62,8 +62,19 @@ class WindowConfig(BaseModel):
         normalized: list[CommandBatch] = []
 
         for idx, block in enumerate(value):
+            if isinstance(block, (tuple, list)) and len(block) == 2:
+                pane_spec, pane_commands = block
+                pane_indices = cls._parse_pane_indices(pane_spec)
+                if not isinstance(pane_commands, (list, tuple)):
+                    raise ValueError("commands list must be a list.")
+                normalized.append((pane_indices, [str(cmd) for cmd in pane_commands]))
+                print("parsed", normalized[-1])
+                continue
+
             if not isinstance(block, dict):
-                raise ValueError(f"Command block #{idx + 1} must be a JSON object")
+                raise ValueError(
+                    f"Command block #{idx + 1} must be a JSON object or a (pane_indices, commands) pair"
+                )
 
             pane_spec = block.get("pane_index")
             if pane_spec is None:
@@ -122,7 +133,9 @@ class WindowConfig(BaseModel):
                     start = int(parts[0])
                     end = int(parts[1])
                     if start > end:
-                        raise ValueError(f"pane range start must be <= end in '{segment}'")
+                        raise ValueError(
+                            f"pane range start must be <= end in '{segment}'"
+                        )
                     indices.extend(list(range(start, end + 1)))
                 else:
                     indices.append(int(segment))
@@ -131,7 +144,9 @@ class WindowConfig(BaseModel):
                 raise ValueError("pane_index string must resolve to at least one pane")
             return sorted(set(indices))
 
-        raise ValueError("pane_index must be int, list of ints, or a string specification")
+        raise ValueError(
+            "pane_index must be int, list of ints, or a string specification"
+        )
 
 
 class SessionConfig(BaseModel):
