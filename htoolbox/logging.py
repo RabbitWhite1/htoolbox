@@ -150,6 +150,7 @@ def init_global_logger(
     """
     global LOGGER
     logger = logging.getLogger(name)
+    logger.handlers.clear()
     lowest_level = min(console_level, file_level)
     logger.setLevel(lowest_level)
 
