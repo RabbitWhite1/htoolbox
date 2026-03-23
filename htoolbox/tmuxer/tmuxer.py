@@ -91,7 +91,6 @@ class Pane:
         cmd = ["send-keys", "-t", f"%{self.uid}", str(command)]
         if enter:
             cmd.append("C-m")
-        rich.print(cmd)
         tmux_run(cmd)
 
     def select(self) -> None:

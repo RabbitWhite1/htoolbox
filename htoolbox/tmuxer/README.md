@@ -45,3 +45,17 @@ You can try:
 cd htoolbox/tmux
 tmuxer -c .tmuxer.placeholder.yaml -P somedir=/usr
 ```
+
+### Work with SSH
+
+When specifying `ssh_server` in the item of the list of commands for a window, the command will be automatically wrapped like
+```
+ssh -n <ssh_server> 'bash -ic "<command>"'
+```
+
+You don't need to worry about quotes, because `shlex.quote` handles the nested quotes.
+
+### Known issues
+
+- When running commands with sudo, it eats all following stdin. Thus we recommend usiing ssh_server to run a command requiring `sudo`
+- After ssh into a server, `exit` works, but will eat following commands
