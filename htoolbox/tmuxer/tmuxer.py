@@ -16,7 +16,7 @@ import yaml
 
 from .config import SessionConfig
 
-CommandBatch = Tuple[list[int], list[str]]
+CommandBatch = Tuple[list[int], list[str], Optional[str]]
 LAYOUT_ALIASES = {
     "eh": "even-horizontal",
     "ev": "even-vertical",
@@ -91,6 +91,7 @@ class Pane:
         cmd = ["send-keys", "-t", f"%{self.uid}", str(command)]
         if enter:
             cmd.append("C-m")
+        rich.print(cmd)
         tmux_run(cmd)
 
     def select(self) -> None:
@@ -429,11 +430,17 @@ class Service:
                 pane.send_keys(f"export IID={pane_index}")
 
             if command_batches:
-                for pane_indices, pane_commands in command_batches:
+                for pane_indices, pane_commands, ssh_server in command_batches:
                     for pane_index in pane_indices:
                         pane = window_panes[pane_index]
                         for cmd in pane_commands:
-                            pane.send_keys(cmd)
+                            command_text = str(cmd)
+                            if ssh_server is not None:
+                                remote_command = f"bash -ic {shlex.quote(command_text)}"
+                                command_text = (
+                                    f"ssh -n {ssh_server} {shlex.quote(remote_command)}"
+                                )
+                            pane.send_keys(command_text)
 
             # Select the window's focus pane after setup
             window_focus_pane = int(window_cfg.focus_pane)

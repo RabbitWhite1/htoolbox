@@ -4,7 +4,7 @@ from typing import Optional, Tuple
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-CommandBatch = Tuple[list[int], list[str]]
+CommandBatch = Tuple[list[int], list[str], Optional[str]]
 LAYOUT_ALIASES = {
     "eh": "even-horizontal",
     "ev": "even-vertical",
@@ -67,8 +67,25 @@ class WindowConfig(BaseModel):
                 pane_indices = cls._parse_pane_indices(pane_spec)
                 if not isinstance(pane_commands, (list, tuple)):
                     raise ValueError("commands list must be a list.")
-                normalized.append((pane_indices, [str(cmd) for cmd in pane_commands]))
-                print("parsed", normalized[-1])
+                normalized.append(
+                    (pane_indices, [str(cmd) for cmd in pane_commands], None)
+                )
+                continue
+
+            if isinstance(block, (tuple, list)) and len(block) == 3:
+                pane_spec, pane_commands, ssh_server = block
+                pane_indices = cls._parse_pane_indices(pane_spec)
+                if not isinstance(pane_commands, (list, tuple)):
+                    raise ValueError("commands list must be a list.")
+                if ssh_server is not None and not str(ssh_server).strip():
+                    raise ValueError("ssh_server cannot be empty")
+                normalized.append(
+                    (
+                        pane_indices,
+                        [str(cmd) for cmd in pane_commands],
+                        None if ssh_server is None else str(ssh_server),
+                    )
+                )
                 continue
 
             if not isinstance(block, dict):
@@ -86,7 +103,19 @@ class WindowConfig(BaseModel):
             if not isinstance(pane_commands, list):
                 raise ValueError("commands list must be a list.")
 
-            normalized.append((pane_indices, [str(cmd) for cmd in pane_commands]))
+            ssh_server = block.get("ssh_server")
+            if ssh_server is not None:
+                ssh_server = str(ssh_server)
+                if not ssh_server.strip():
+                    raise ValueError("ssh_server cannot be empty")
+
+            normalized.append(
+                (
+                    pane_indices,
+                    [str(cmd) for cmd in pane_commands],
+                    ssh_server,
+                )
+            )
 
         return normalized
 
@@ -98,7 +127,7 @@ class WindowConfig(BaseModel):
         return self
 
     def _validate_command_panes(self) -> None:
-        for pane_indices, _ in self.commands:
+        for pane_indices, _, _ in self.commands:
             for pane_index in pane_indices:
                 if pane_index < 0 or pane_index >= self.num_panes:
                     raise ValueError(f"command pane index {pane_index} is out of range")
