@@ -491,7 +491,7 @@ def _build_session_config(
     if kill_override:
         effective_config["kill"] = True
 
-    return SessionConfig.model_validate(effective_config)
+    return SessionConfig.from_dict(effective_config)
 
 
 def _write_placeholder_config(cfg_path: Path) -> None:
@@ -569,7 +569,7 @@ def session_config_from_args(args: argparse.Namespace) -> SessionConfig:
                 }
             ],
         }
-        session_config = SessionConfig.model_validate(config)
+        session_config = SessionConfig.from_dict(config)
     else:
         placeholder_values = _parse_placeholder_args(args.placeholder)
         config = _load_config(args.config, placeholder_values)

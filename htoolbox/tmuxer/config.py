@@ -1,8 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from typing import Optional, Tuple
-
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 CommandBatch = Tuple[list[int], list[str], Optional[str]]
 LAYOUT_ALIASES = {
@@ -14,45 +13,44 @@ LAYOUT_ALIASES = {
 }
 LAYOUT_OPTIONS = set(LAYOUT_ALIASES.values()).union(set(LAYOUT_ALIASES.keys()))
 
+_WINDOW_CONFIG_FIELDS = {"window", "num_panes", "layout", "focus_pane", "commands", "kill", "ssh_server"}
+_SESSION_CONFIG_FIELDS = {"session", "focus_window", "windows", "kill"}
 
-class WindowConfig(BaseModel):
-    model_config = ConfigDict(extra="forbid")
 
-    window: Optional[str] = None
+@dataclass
+class WindowConfig:
     num_panes: int
+    window: Optional[str] = None
     layout: str = "even-vertical"
     focus_pane: int = 0
-    commands: list[CommandBatch] = Field(default_factory=list)
+    commands: list[CommandBatch] = field(default_factory=list)
     kill: bool = False
 
-    @field_validator("num_panes", mode="before")
-    @classmethod
-    def validate_num_panes(cls, value):
-        value = int(value)
-        if value < 1:
+    def __post_init__(self):
+        self.num_panes = int(self.num_panes)
+        if self.num_panes < 1:
             raise ValueError("Number of new panes must be at least 1")
-        return value
 
-    @field_validator("layout", mode="before")
-    @classmethod
-    def validate_layout(cls, value):
-        value = str(value).lower().strip()
+        value = str(self.layout).lower().strip()
         if value in LAYOUT_ALIASES:
-            return LAYOUT_ALIASES[value]
-        if value in LAYOUT_ALIASES.values():
-            return value
-        raise ValueError("layout must be one of: " + ", ".join(sorted(LAYOUT_OPTIONS)))
+            self.layout = LAYOUT_ALIASES[value]
+        elif value in LAYOUT_ALIASES.values():
+            self.layout = value
+        else:
+            raise ValueError("layout must be one of: " + ", ".join(sorted(LAYOUT_OPTIONS)))
 
-    @field_validator("focus_pane", mode="before")
-    @classmethod
-    def validate_focus_pane(cls, value):
-        if value is None:
-            return 0
-        return int(value)
+        if self.focus_pane is None:
+            self.focus_pane = 0
+        else:
+            self.focus_pane = int(self.focus_pane)
 
-    @field_validator("commands", mode="before")
-    @classmethod
-    def validate_commands(cls, value):
+        self.commands = self._validate_commands(self.commands)
+
+        if self.focus_pane < 0 or self.focus_pane >= self.num_panes:
+            raise ValueError(f"focus_pane index {self.focus_pane} is out of range")
+        self._validate_command_panes()
+
+    def _validate_commands(self, value) -> list[CommandBatch]:
         if not value:
             return []
 
@@ -64,7 +62,7 @@ class WindowConfig(BaseModel):
         for idx, block in enumerate(value):
             if isinstance(block, (tuple, list)) and len(block) == 2:
                 pane_spec, pane_commands = block
-                pane_indices = cls._parse_pane_indices(pane_spec)
+                pane_indices = self._parse_pane_indices(pane_spec)
                 if not isinstance(pane_commands, (list, tuple)):
                     raise ValueError("commands list must be a list.")
                 normalized.append(
@@ -74,7 +72,7 @@ class WindowConfig(BaseModel):
 
             if isinstance(block, (tuple, list)) and len(block) == 3:
                 pane_spec, pane_commands, ssh_server = block
-                pane_indices = cls._parse_pane_indices(pane_spec)
+                pane_indices = self._parse_pane_indices(pane_spec)
                 if not isinstance(pane_commands, (list, tuple)):
                     raise ValueError("commands list must be a list.")
                 if ssh_server is not None and not str(ssh_server).strip():
@@ -97,7 +95,7 @@ class WindowConfig(BaseModel):
             if pane_spec is None:
                 raise ValueError("Each command block requires a pane_index")
 
-            pane_indices = cls._parse_pane_indices(pane_spec)
+            pane_indices = self._parse_pane_indices(pane_spec)
 
             pane_commands = block.get("commands")
             if not isinstance(pane_commands, list):
@@ -118,13 +116,6 @@ class WindowConfig(BaseModel):
             )
 
         return normalized
-
-    @model_validator(mode="after")
-    def validate_window_ranges(self):
-        if self.focus_pane < 0 or self.focus_pane >= self.num_panes:
-            raise ValueError(f"focus_pane index {self.focus_pane} is out of range")
-        self._validate_command_panes()
-        return self
 
     def _validate_command_panes(self) -> None:
         for pane_indices, _, _ in self.commands:
@@ -177,41 +168,68 @@ class WindowConfig(BaseModel):
             "pane_index must be int, list of ints, or a string specification"
         )
 
+    @classmethod
+    def from_dict(cls, data: dict) -> "WindowConfig":
+        unknown = set(data) - _WINDOW_CONFIG_FIELDS
+        if unknown:
+            raise ValueError(
+                f"Unknown fields in window config: {', '.join(sorted(unknown))}"
+            )
+        return cls(
+            window=data.get("window"),
+            num_panes=data["num_panes"],
+            layout=data.get("layout", "even-vertical"),
+            focus_pane=data.get("focus_pane", 0),
+            commands=data.get("commands", []),
+            kill=bool(data.get("kill", False)),
+        )
 
-class SessionConfig(BaseModel):
-    model_config = ConfigDict(extra="forbid")
 
+@dataclass
+class SessionConfig:
     session: str
-    focus_window: int = 0
     windows: list[WindowConfig]
+    focus_window: int = 0
     kill: bool = False
 
-    @field_validator("session", mode="before")
-    @classmethod
-    def validate_session(cls, value):
-        if value is None:
+    def __post_init__(self):
+        if self.session is None:
             raise ValueError("session must be a non-empty string")
-        value = str(value).strip()
-        if not value:
+        self.session = str(self.session).strip()
+        if not self.session:
             raise ValueError("session must be a non-empty string")
-        return value
 
-    @field_validator("focus_window", mode="before")
-    @classmethod
-    def validate_focus_window(cls, value):
-        if value is None:
-            return 0
-        return int(value)
+        if self.focus_window is None:
+            self.focus_window = 0
+        else:
+            self.focus_window = int(self.focus_window)
 
-    @field_validator("windows", mode="before")
-    @classmethod
-    def validate_windows(cls, value):
-        if not isinstance(value, list) or not value:
+        if not isinstance(self.windows, list) or not self.windows:
             raise ValueError("windows must be a non-empty list")
-        return value
 
-    @model_validator(mode="after")
-    def validate_focus_window_range(self):
         if self.focus_window < 0 or self.focus_window >= len(self.windows):
             raise ValueError("focus_window is out of range")
-        return self
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "SessionConfig":
+        unknown = set(data) - _SESSION_CONFIG_FIELDS
+        if unknown:
+            raise ValueError(
+                f"Unknown fields in session config: {', '.join(sorted(unknown))}"
+            )
+
+        raw_windows = data.get("windows")
+        if not isinstance(raw_windows, list) or not raw_windows:
+            raise ValueError("windows must be a non-empty list")
+
+        windows = [
+            WindowConfig.from_dict(w) if isinstance(w, dict) else w
+            for w in raw_windows
+        ]
+
+        return cls(
+            session=data.get("session"),
+            focus_window=data.get("focus_window", 0),
+            windows=windows,
+            kill=bool(data.get("kill", False)),
+        )
