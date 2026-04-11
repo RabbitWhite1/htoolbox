@@ -47,7 +47,7 @@ windows:
           - pane_index: "0"
               commands:
                   - bash
-                  - cd <somedir>
+                  - cd @@somedir@@
           - pane_index: "1"
               commands:
                   - cd /bin
@@ -55,6 +55,7 @@ windows:
               commands:
                   - htop
 """
+PLACEHOLDER_TOKEN_PATTERN = re.compile(r"@@([A-Za-z_][A-Za-z0-9_]*)@@")
 
 
 def tmux_run(
@@ -521,12 +522,19 @@ def _load_config(config: Path, placeholders: Dict[str, str]):
 
 
 def _apply_placeholders(text: str, placeholders: Dict[str, str]) -> str:
-    if not placeholders:
-        return text
-
     rendered = text
     for name, value in placeholders.items():
-        rendered = rendered.replace(f"<{name}>", str(value))
+        rendered = rendered.replace(f"@@{name}@@", str(value))
+
+    unresolved = sorted(set(PLACEHOLDER_TOKEN_PATTERN.findall(rendered)))
+    if unresolved:
+        formatted = "; ".join(
+            f"@@{name}@@ (use -P {name}=VALUE)" for name in unresolved
+        )
+        raise ValueError(
+            f"Missing placeholder value(s): {formatted}."
+        )
+
     return rendered
 
 
@@ -634,24 +642,30 @@ def main():
 
     args = parser.parse_args()
 
-    if args.config is None:
-        args.config = _detect_config_path()
-    else:
-        args.config = Path(args.config).expanduser()
-        if not args.config.is_file():
-            _write_placeholder_config(args.config)
-            raise FileNotFoundError(
-                f"Config file not found. Placeholder created at: {args.config}"
-            )
+    try:
+        if args.config is None:
+            args.config = _detect_config_path()
+        else:
+            args.config = Path(args.config).expanduser()
+            if not args.config.is_file():
+                _write_placeholder_config(args.config)
+                raise FileNotFoundError(
+                    f"Config file not found. Placeholder created at: {args.config}"
+                )
 
-    session_config = session_config_from_args(args)
+        session_config = session_config_from_args(args)
 
-    if args.dry:
-        rich.print("Exiting since --dry specified.")
-        return
+        if args.dry:
+            rich.print("Exiting since --dry specified.")
+            return
 
-    service = Service()
-    service.start_session_from_config(config=session_config, detach=bool(args.detach))
+        service = Service()
+        service.start_session_from_config(
+            config=session_config, detach=bool(args.detach)
+        )
+    except ValueError as exc:
+        rich.print(f"[red]Error:[/red] {exc}")
+        raise SystemExit(2)
 
 
 if __name__ == "__main__":

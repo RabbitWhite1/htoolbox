@@ -1,31 +1,42 @@
-session: tmuxer-example
+session: devbox
+focus_window: 1
+kill: true
+
 windows:
   - window: workspace
     num_panes: 3
-    layout: even-vertical
+    layout: ev
     focus_pane: 0
     kill: true
     commands:
       - pane_index: "0-1"
         commands:
-          - bash
+          - echo "workspace panes ready"
+
       - pane_index: "0"
         commands:
+          - cd @@workdir@@
           - bash
-          - cd /usr
+
       - pane_index: "1"
         commands:
-          - cd /bin
+          - cd @@workdir@@
+          - ls -la
+
       - pane_index: "2"
         commands:
-          - htop
-  - window: logs
+          - top
+
+  - window: monitoring
     num_panes: 2
-    layout: even-horizontal
+    layout: tiled
+    focus_pane: 0
+    kill: true
     commands:
       - pane_index: "0"
         commands:
-          - tail -f /var/log/syslog
+          - tail -f /var/log/system.log
+
       - pane_index: "1"
         commands:
-          - htop
+          - ping -c 5 8.8.8.8
