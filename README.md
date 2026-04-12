@@ -1,58 +1,68 @@
 # HToolbox
 
-This repository provides some useful tools that fit my developing habits.
+HToolbox is a collection of small command-line utilities and helpers for development workflows.
 
-The package is available on PyPI, so you can directly install this package via `pip`:
+## Installation
+
+Install from PyPI:
 
 ```bash
 pip install htoolbox
 ```
 
-Alternatively, you can install it with a cloned repository:
+Or install from source:
 
 ```bash
 git clone git@github.com:RabbitWhite1/htoolbox.git $HOME/.htoolbox
 cd $HOME/.htoolbox && pip install .
 ```
 
-`uv` is also recommended to use this package because you can easily install it to your user environment via:
+You can also install with uv:
 
 ```bash
 uv tool install .
 ```
 
-## codeit
+## Components
 
-This tool is a quick script for starting vscode server on a remote server, and utilizing SSH port forwarding to access it locally.
+### vscode (codeit)
 
-```bash
-codeit <remote-host>
-```
+Starts VS Code server on a remote host and helps set up SSH forwarding for local access.
 
-## docker
+- Component README: [htoolbox/vscode/README.md](htoolbox/vscode/README.md)
 
-A Dockerfile providing my preferred development environment.
+### docker
 
-## downloader
+Provides a Docker-based development environment image and usage notes.
 
-A simple batched video downloader script with `rich` progress bars.
+- Component README: [htoolbox/docker/README.md](htoolbox/docker/README.md)
 
-## tmuxer
+### downloader
 
-A helper script `tmuxer` to create multiple tmux panes easily.
+Batched video downloader with rich progress output.
 
-Run the installed command:
+- Component README: [htoolbox/downloader/README.md](htoolbox/downloader/README.md)
 
-```bash
-tmuxer -s mysession -n 3 --layout ev
-```
+### tmuxer
 
-This will start (or attach) to a tmux session named `mysession` with 3 panes using the `even-vertical` layout (`ev`).
+Creates and configures tmux sessions/windows/panes from CLI flags or config files.
 
-## singularity
+- Component README: [htoolbox/tmuxer/README.md](htoolbox/tmuxer/README.md)
 
-A helper script `smagic` that wraps singularity commands for easier usage.
+### singularity (smagic)
 
-## Release Workflow
+Wrapper script for common singularity command workflows.
 
-Use the helper script `./tag_version <new_version>` to bump the version stored in `pyproject.toml`. The script will print the git commands needed to create and push the release tag so you can copy and run them manually.
+- Component README: [htoolbox/singularity/README.md](htoolbox/singularity/README.md)
+
+### hscan
+
+Single-file helper script in [htoolbox/hscan](htoolbox/hscan) for quick scanning tasks.
+
+### logging.py
+
+Shared logging utilities in [htoolbox/logging.py](htoolbox/logging.py).
+
+### tag_version
+
+Release helper in [tag_version](tag_version) that bumps the version in pyproject.toml and prints git tag/push commands.
