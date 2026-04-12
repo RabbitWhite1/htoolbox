@@ -106,7 +106,7 @@ class Pane:
     def __str__(self):
         return f"{self.index}%{self.uid}"
 
-    async def send_keys(self, command: str, enter: bool = True, timeout: float = 300.0) -> None:
+    async def send_keys(self, command: str, enter: bool = True, timeout: float = 1800.0) -> None:
         """Send keys to this pane and wait for completion via a sentinel echo."""
         cmd = ["send-keys", "-t", f"%{self.uid}", str(command)]
         if enter:
@@ -114,7 +114,7 @@ class Pane:
         await tmux_run_async(cmd)
         if not enter:
             return
-        sentinel = f"__TMUXER_{self.uid}_{self._send_count}__"
+        sentinel = f"__TMUXER_{self._send_count}__"
         self._send_count += 1
         await tmux_run_async(["send-keys", "-t", f"%{self.uid}", f"echo {sentinel}", "C-m"])
         await self._wait_for_sentinel(sentinel, timeout)
@@ -406,33 +406,24 @@ class Service:
                 return s
         raise RuntimeError("Failed to create new session")
 
-    async def start_session_from_config(
-        self,
-        config: SessionConfig,
-        detach: bool = True,
-    ):
-        """Start and optionally attach to a tmux session.
+    def create_session(self, config: SessionConfig) -> tuple[list[tuple], str]:
+        """Synchronously create all tmux windows and panes.
 
-        Pane creation is synchronous and fast. Command dispatch runs as a
-        background asyncio task so the session is visible immediately on attach.
+        Returns (command_jobs, session_name). command_jobs is consumed by
+        _dispatch_commands to send the actual keystrokes.
         """
-        # Try kill if required.
         existing_session = self.get_session(config.session)
         if existing_session is not None:
             if config.kill:
                 existing_session.kill(quiet=True)
             else:
                 for window_cfg in config.windows:
-                    if not window_cfg.kill:
-                        continue
-                    if not window_cfg.window:
+                    if not window_cfg.kill or not window_cfg.window:
                         continue
                     window = existing_session.window_by_name(window_cfg.window)
-                    if window is None:
-                        continue
-                    window.kill(quiet=True)
+                    if window is not None:
+                        window.kill(quiet=True)
 
-        # Phase 1 (sync, fast): create all windows and panes.
         session_name = config.session
         windows = config.windows
         focus_window = config.focus_window
@@ -441,18 +432,13 @@ class Service:
             raise ValueError("At least one window must be provided")
 
         created_windows: list[Window] = []
-        # Each entry: (window_panes dict, num_panes, command_batches)
         command_jobs: list[tuple] = []
 
         for window_index, window_cfg in enumerate(windows):
-            window_name = window_cfg.window
-            new_panes = window_cfg.num_panes
-            layout = window_cfg.layout
-
             if window_index == 0:
                 session = self.new_session(
                     session_name=session_name,
-                    window_name=window_name,
+                    window_name=window_cfg.window,
                     detach=True,
                 )
                 window = sorted(session.windows(refresh=True), key=lambda w: w.uid)[0]
@@ -462,52 +448,23 @@ class Service:
                     raise RuntimeError(
                         f"Session not found after creation: {session_name}"
                     )
-                window = session.new_window(window_name=window_name, detach=True)
+                window = session.new_window(window_name=window_cfg.window, detach=True)
 
             created_windows.append(window)
 
-            for _ in range(1, new_panes):
+            for _ in range(1, window_cfg.num_panes):
                 window.split(detach=True)
-                window.select_layout(layout)
+                window.select_layout(window_cfg.layout)
 
             window_panes = {pane.index: pane for pane in window.panes(refresh=True)}
-            command_jobs.append((window_panes, new_panes, window_cfg.commands))
-
+            command_jobs.append((window_panes, window_cfg.num_panes, window_cfg.commands))
             window.pane_by_index(int(window_cfg.focus_pane), refresh=True).select()
 
         if focus_window < 0 or focus_window >= len(created_windows):
             raise ValueError("focus_window is out of range")
         created_windows[focus_window].select()
 
-        # Phase 2: dispatch commands.
-        # Only run in the background (concurrent with attach) when we are actually
-        # going to block on attach — otherwise asyncio.run() would cancel the task
-        # as soon as the coroutine returns.
-        will_attach = not detach and not os.environ.get("TMUX")
-
-        if will_attach:
-            asyncio.create_task(self._dispatch_commands(command_jobs))
-        else:
-            # Not attaching: run dispatch in foreground so it completes fully.
-            dispatch_task = asyncio.ensure_future(self._dispatch_commands(command_jobs))
-
-        if detach:
-            await dispatch_task
-            return
-
-        if os.environ.get("TMUX"):
-            rich.print(
-                "[yellow]Detected existing tmux session ($TMUX is set).[/yellow] "
-                "New session was created but auto-attach is skipped to keep your current tmux context. "
-                f"To force attach later, run: [bold]unset TMUX && tmux attach-session -t {session_name}[/bold]"
-            )
-            await dispatch_task
-            return
-
-        session = self.get_session(session_name)
-        if session is None:
-            raise RuntimeError(f"Session not found for attach: {session_name}")
-        await asyncio.to_thread(session.attach)
+        return command_jobs, session_name
 
     async def _dispatch_commands(self, command_jobs: list[tuple]) -> None:
         """Background task: export IID and send all command batches.
@@ -728,9 +685,36 @@ def main():
             return
 
         service = Service()
-        asyncio.run(service.start_session_from_config(
-            config=session_config, detach=bool(args.detach)
-        ))
+        command_jobs, session_name = service.create_session(config=session_config)
+
+        if args.detach:
+            # No attach — dispatch in foreground then exit.
+            asyncio.run(service._dispatch_commands(command_jobs))
+            return
+
+        if os.environ.get("TMUX"):
+            rich.print(
+                "[yellow]Detected existing tmux session ($TMUX is set).[/yellow] "
+                "New session was created but auto-attach is skipped to keep your current tmux context. "
+                f"To force attach later, run: [bold]unset TMUX && tmux attach-session -t {session_name}[/bold]"
+            )
+            asyncio.run(service._dispatch_commands(command_jobs))
+            return
+
+        # Fork so the child can orphan-dispatch while the parent attaches.
+        # The child calls os.setsid() to detach from the terminal, then runs
+        # dispatch to completion. The parent simply attaches and exits — when
+        # the user presses ctrl+B d the parent exits, leaving the child alive.
+        pid = os.fork()
+        if pid == 0:
+            os.setsid()
+            asyncio.run(service._dispatch_commands(command_jobs))
+            os._exit(0)
+
+        session = service.get_session(session_name)
+        if session is None:
+            raise RuntimeError(f"Session not found for attach: {session_name}")
+        session.attach()
     except ValueError as exc:
         rich.print(f"[red]Error:[/red] {exc}")
         raise SystemExit(2)
