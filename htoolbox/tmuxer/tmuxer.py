@@ -4,6 +4,7 @@ import argparse
 import functools
 import os
 import os.path as osp
+import asyncio
 import re
 import shlex
 import subprocess
@@ -71,6 +72,23 @@ def tmux_run(
     )
 
 
+async def tmux_run_async(tmux_args, capture_output=False, check=False):
+    """Async tmux runner using asyncio subprocesses — no threads."""
+    stdout = asyncio.subprocess.PIPE if capture_output else None
+    stderr = asyncio.subprocess.PIPE if capture_output else None
+    proc = await asyncio.create_subprocess_exec(
+        "tmux", *tmux_args, stdout=stdout, stderr=stderr
+    )
+    stdout_data, _ = await proc.communicate()
+    if check and proc.returncode != 0:
+        raise subprocess.CalledProcessError(proc.returncode, ["tmux", *tmux_args])
+    return subprocess.CompletedProcess(
+        args=["tmux", *tmux_args],
+        returncode=proc.returncode,
+        stdout=stdout_data.decode() if stdout_data else None,
+    )
+
+
 class Pane:
     def __init__(
         self, uid: int, index: int, service: Service, session: Session, window: Window
@@ -80,6 +98,7 @@ class Pane:
         self.service = service
         self.session = session
         self.window = window
+        self._send_count = 0
 
     def __repr__(self):
         return f"{self.index}%{self.uid}"
@@ -87,12 +106,38 @@ class Pane:
     def __str__(self):
         return f"{self.index}%{self.uid}"
 
-    def send_keys(self, command: str, enter: bool = True) -> None:
-        """Send keys to this pane."""
+    async def send_keys(self, command: str, enter: bool = True, timeout: float = 300.0) -> None:
+        """Send keys to this pane and wait for completion via a sentinel echo."""
         cmd = ["send-keys", "-t", f"%{self.uid}", str(command)]
         if enter:
             cmd.append("C-m")
-        tmux_run(cmd)
+        await tmux_run_async(cmd)
+        if not enter:
+            return
+        sentinel = f"__TMUXER_{self.uid}_{self._send_count}__"
+        self._send_count += 1
+        await tmux_run_async(["send-keys", "-t", f"%{self.uid}", f"echo {sentinel}", "C-m"])
+        await self._wait_for_sentinel(sentinel, timeout)
+
+    async def _wait_for_sentinel(self, sentinel: str, timeout: float) -> None:
+        """Poll capture-pane until a line matching exactly the sentinel appears.
+
+        Checking for an exact line match avoids a false positive from the typed
+        'echo <sentinel>' input, which includes the shell prompt and 'echo ' prefix.
+        """
+        deadline = asyncio.get_event_loop().time() + timeout
+        while asyncio.get_event_loop().time() < deadline:
+            result = await tmux_run_async(
+                ["capture-pane", "-t", f"%{self.uid}", "-p"],
+                capture_output=True,
+            )
+            if any(
+                line.strip() == sentinel
+                for line in (result.stdout or "").splitlines()
+            ):
+                return
+            await asyncio.sleep(0.05)
+        rich.print(f"[yellow]Warning:[/yellow] timed out waiting for pane %{self.uid} after {timeout}s")
 
     def select(self) -> None:
         """Select this pane as active."""
@@ -361,12 +406,16 @@ class Service:
                 return s
         raise RuntimeError("Failed to create new session")
 
-    def start_session_from_config(
+    async def start_session_from_config(
         self,
         config: SessionConfig,
         detach: bool = True,
     ):
-        """Start and optionally attach to a tmux session."""
+        """Start and optionally attach to a tmux session.
+
+        Pane creation is synchronous and fast. Command dispatch runs as a
+        background asyncio task so the session is visible immediately on attach.
+        """
         # Try kill if required.
         existing_session = self.get_session(config.session)
         if existing_session is not None:
@@ -377,29 +426,28 @@ class Service:
                     if not window_cfg.kill:
                         continue
                     if not window_cfg.window:
-                        # window name is not specified, don't kill
                         continue
                     window = existing_session.window_by_name(window_cfg.window)
                     if window is None:
                         continue
                     window.kill(quiet=True)
 
-        # Create the session
+        # Phase 1 (sync, fast): create all windows and panes.
         session_name = config.session
         windows = config.windows
         focus_window = config.focus_window
-        focus_pane = config.windows[focus_window].focus_pane
 
         if not windows:
             raise ValueError("At least one window must be provided")
 
         created_windows: list[Window] = []
+        # Each entry: (window_panes dict, num_panes, command_batches)
+        command_jobs: list[tuple] = []
 
         for window_index, window_cfg in enumerate(windows):
             window_name = window_cfg.window
             new_panes = window_cfg.num_panes
             layout = window_cfg.layout
-            command_batches = window_cfg.commands
 
             if window_index == 0:
                 session = self.new_session(
@@ -418,43 +466,26 @@ class Service:
 
             created_windows.append(window)
 
-            # Create new panes if specified
             for _ in range(1, new_panes):
                 window.split(detach=True)
                 window.select_layout(layout)
 
             window_panes = {pane.index: pane for pane in window.panes(refresh=True)}
+            command_jobs.append((window_panes, new_panes, window_cfg.commands))
 
-            for pane_index in range(new_panes):
-                pane = window_panes[pane_index]
-                pane.send_keys(f"export IID={pane_index}")
+            window.pane_by_index(int(window_cfg.focus_pane), refresh=True).select()
 
-            if command_batches:
-                for pane_indices, pane_commands, ssh_server in command_batches:
-                    for pane_index in pane_indices:
-                        pane = window_panes[pane_index]
-                        for cmd in pane_commands:
-                            command_text = str(cmd)
-                            if ssh_server is not None:
-                                remote_command = f"bash -ic {shlex.quote(command_text)}"
-                                command_text = (
-                                    f"ssh -n {ssh_server} {shlex.quote(remote_command)}"
-                                )
-                            pane.send_keys(command_text)
-
-            # Select the window's focus pane after setup
-            window_focus_pane = int(window_cfg.focus_pane)
-            window.pane_by_index(window_focus_pane, refresh=True).select()
-
-        # Select the specified pane/window focus
         if focus_window < 0 or focus_window >= len(created_windows):
             raise ValueError("focus_window is out of range")
         created_windows[focus_window].select()
 
+        # Phase 2 (async, slow): send commands in the background.
+        asyncio.create_task(self._dispatch_commands(command_jobs))
+
         if detach:
             return
 
-        # Attach to the tmux session
+        # Attach — run in a thread so the event loop keeps driving Phase 2.
         if os.environ.get("TMUX"):
             rich.print(
                 "[yellow]Detected existing tmux session ($TMUX is set).[/yellow] "
@@ -465,7 +496,33 @@ class Service:
         session = self.get_session(session_name)
         if session is None:
             raise RuntimeError(f"Session not found for attach: {session_name}")
-        session.attach()
+        await asyncio.to_thread(session.attach)
+
+    async def _dispatch_commands(self, command_jobs: list[tuple]) -> None:
+        """Background task: export IID and send all command batches.
+
+        Within each batch, all panes run their commands concurrently.
+        Batches still execute in order — the next batch starts only after
+        all panes in the current batch have finished.
+        """
+        async def _run_pane(pane, pane_commands, ssh_server):
+            for cmd in pane_commands:
+                command_text = str(cmd)
+                if ssh_server is not None:
+                    remote_command = f"bash -ic {shlex.quote(command_text)}"
+                    command_text = f"ssh -n {ssh_server} {shlex.quote(remote_command)}"
+                await pane.send_keys(command_text)
+
+        for window_panes, new_panes, command_batches in command_jobs:
+            await asyncio.gather(*[
+                window_panes[i].send_keys(f"export IID={i}")
+                for i in range(new_panes)
+            ])
+            for pane_indices, pane_commands, ssh_server in command_batches:
+                await asyncio.gather(*[
+                    _run_pane(window_panes[pane_index], pane_commands, ssh_server)
+                    for pane_index in pane_indices
+                ])
 
     def __str__(self):
         items = []
@@ -660,9 +717,9 @@ def main():
             return
 
         service = Service()
-        service.start_session_from_config(
+        asyncio.run(service.start_session_from_config(
             config=session_config, detach=bool(args.detach)
-        )
+        ))
     except ValueError as exc:
         rich.print(f"[red]Error:[/red] {exc}")
         raise SystemExit(2)
