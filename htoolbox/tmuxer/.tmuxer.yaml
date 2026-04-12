@@ -1,7 +1,6 @@
 session: devbox
 focus_window: 1
 kill: true
-
 windows:
   - window: workspace
     num_panes: 3
@@ -12,21 +11,17 @@ windows:
       - pane_index: "0-1"
         commands:
           - echo "workspace panes ready"
-
       - pane_index: "0"
         commands:
           - cd @@workdir@@
           - bash
-
       - pane_index: "1"
         commands:
           - cd @@workdir@@
           - ls -la
-
       - pane_index: "2"
         commands:
           - top
-
   - window: monitoring
     num_panes: 2
     layout: tiled
@@ -36,7 +31,6 @@ windows:
       - pane_index: "0"
         commands:
           - tail -f /var/log/system.log
-
       - pane_index: "1"
         commands:
           - ping -c 5 8.8.8.8

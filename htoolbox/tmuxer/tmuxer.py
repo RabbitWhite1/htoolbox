@@ -22,33 +22,27 @@ CONFIG_CANDIDATES = (
     ".tmuxer.yml",
 )
 PLACEHOLDER_CONFIG_YAML = """# An example tmuxer config file.
-session: tmuxer-session
-focus_window: 0
+session: devbox
+focus_window: 1
+kill: true
 windows:
-    - window: workspace
-      num_panes: 3
-      layout: even-vertical
-      focus_pane: 0
-      kill: true
-      commands:
-          # Run commands in panes 0 and 1 in parallel, wait for completion (default).
-          - pane_index: "0-1"
-            commands:
-                - bash
-          - pane_index: "0"
-            commands:
-                - bash
-                - cd @@somedir@@
-          - pane_index: "1"
-            commands:
-                - cd /bin
-          # sentinel: false — fire and forget; do not wait before the next batch.
-          # Useful for commands that block indefinitely (e.g. ssh <server>) or
-          # when you intentionally want to start the next batch immediately.
-          - pane_index: "2"
-            sentinel: false
-            commands:
-                - htop
+  - window: workspace
+    num_panes: 3
+    layout: ev
+    focus_pane: 0
+    kill: true
+    commands:
+      - pane_index: "0-1"
+        commands:
+          - echo "workspace panes ready"
+      - pane_index: "0"
+        commands:
+          - cd @@workdir@@
+          - bash
+      - pane_index: "1"
+        commands:
+          - cd @@workdir@@
+          - ls -la
 """
 PLACEHOLDER_TOKEN_PATTERN = re.compile(r"@@([A-Za-z_][A-Za-z0-9_]*)@@")
 
