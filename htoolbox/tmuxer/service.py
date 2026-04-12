@@ -70,17 +70,30 @@ class Pane:
             return
         sentinel = f"__TMUXER_{self._send_count}__"
         self._send_count += 1
-        await tmux_run_async(["send-keys", "-t", f"%{self.uid}", f"echo {sentinel}", "C-m"])
         await self._wait_for_sentinel(sentinel, timeout)
 
     async def _wait_for_sentinel(self, sentinel: str, timeout: float) -> None:
-        """Poll capture-pane until a line matching exactly the sentinel appears.
+        """Periodically send 'echo <sentinel>' until it appears in capture-pane.
 
-        Checking for an exact line match avoids a false positive from the typed
-        'echo <sentinel>' input, which includes the shell prompt and 'echo ' prefix.
+        Sending the echo on an interval rather than once handles two cases:
+        - PTY C-m race: if the first ping races with the command's C-m and gets
+          dropped, a later ping will succeed once the PTY has caught up.
+        - Interactive commands (e.g. 'ssh <server>'): pings queue up in the PTY
+          and execute as soon as the (remote) shell becomes ready, without needing
+          to know anything about the command type.
+
+        Exact line match avoids false positives from the typed 'echo <sentinel>'
+        input, which also contains 'echo ' and the shell prompt prefix.
         """
         deadline = asyncio.get_event_loop().time() + timeout
+        last_ping = float("-inf")
+        ping_interval = 8.0
         while asyncio.get_event_loop().time() < deadline:
+            now = asyncio.get_event_loop().time()
+            if now - last_ping >= ping_interval:
+                await tmux_run_async(["send-keys", "-t", f"%{self.uid}", f"echo {sentinel}", "C-m"])
+                last_ping = now
+                ping_interval = min(ping_interval * 2, 128.0)
             result = await tmux_run_async(
                 ["capture-pane", "-t", f"%{self.uid}", "-p"],
                 capture_output=True,

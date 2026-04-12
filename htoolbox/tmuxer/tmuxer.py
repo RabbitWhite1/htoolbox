@@ -243,20 +243,19 @@ def main():
             asyncio.run(service._dispatch_commands(command_jobs))
             return
 
-        # Fork so the child can orphan-dispatch while the parent attaches.
-        # The child calls os.setsid() to detach from the terminal, then runs
-        # dispatch to completion. The parent simply attaches and exits — when
-        # the user presses ctrl+B d the parent exits, leaving the child alive.
-        pid = os.fork()
-        if pid == 0:
-            os.setsid()
-            asyncio.run(service._dispatch_commands(command_jobs))
-            os._exit(0)
+        async def _attach_and_dispatch():
+            task = asyncio.create_task(service._dispatch_commands(command_jobs))
+            session = service.get_session(session_name)
+            if session is None:
+                raise RuntimeError(f"Session not found for attach: {session_name}")
+            await asyncio.to_thread(session.attach)
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
 
-        session = service.get_session(session_name)
-        if session is None:
-            raise RuntimeError(f"Session not found for attach: {session_name}")
-        session.attach()
+        asyncio.run(_attach_and_dispatch())
     except ValueError as exc:
         rich.print(f"[red]Error:[/red] {exc}")
         raise SystemExit(2)
