@@ -479,20 +479,31 @@ class Service:
             raise ValueError("focus_window is out of range")
         created_windows[focus_window].select()
 
-        # Phase 2 (async, slow): send commands in the background.
-        asyncio.create_task(self._dispatch_commands(command_jobs))
+        # Phase 2: dispatch commands.
+        # Only run in the background (concurrent with attach) when we are actually
+        # going to block on attach — otherwise asyncio.run() would cancel the task
+        # as soon as the coroutine returns.
+        will_attach = not detach and not os.environ.get("TMUX")
+
+        if will_attach:
+            asyncio.create_task(self._dispatch_commands(command_jobs))
+        else:
+            # Not attaching: run dispatch in foreground so it completes fully.
+            dispatch_task = asyncio.ensure_future(self._dispatch_commands(command_jobs))
 
         if detach:
+            await dispatch_task
             return
 
-        # Attach — run in a thread so the event loop keeps driving Phase 2.
         if os.environ.get("TMUX"):
             rich.print(
                 "[yellow]Detected existing tmux session ($TMUX is set).[/yellow] "
                 "New session was created but auto-attach is skipped to keep your current tmux context. "
                 f"To force attach later, run: [bold]unset TMUX && tmux attach-session -t {session_name}[/bold]"
             )
+            await dispatch_task
             return
+
         session = self.get_session(session_name)
         if session is None:
             raise RuntimeError(f"Session not found for attach: {session_name}")
