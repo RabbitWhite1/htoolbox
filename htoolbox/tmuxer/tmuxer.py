@@ -31,19 +31,24 @@ windows:
       focus_pane: 0
       kill: true
       commands:
+          # Run commands in panes 0 and 1 in parallel, wait for completion (default).
           - pane_index: "0-1"
-              commands:
-                  - bash
+            commands:
+                - bash
           - pane_index: "0"
-              commands:
-                  - bash
-                  - cd @@somedir@@
+            commands:
+                - bash
+                - cd @@somedir@@
           - pane_index: "1"
-              commands:
-                  - cd /bin
+            commands:
+                - cd /bin
+          # sentinel: false — fire and forget; do not wait before the next batch.
+          # Useful for commands that block indefinitely (e.g. ssh <server>) or
+          # when you intentionally want to start the next batch immediately.
           - pane_index: "2"
-              commands:
-                  - htop
+            sentinel: false
+            commands:
+                - htop
 """
 PLACEHOLDER_TOKEN_PATTERN = re.compile(r"@@([A-Za-z_][A-Za-z0-9_]*)@@")
 

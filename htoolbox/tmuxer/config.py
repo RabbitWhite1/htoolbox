@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Optional, Tuple
 
-CommandBatch = Tuple[list[int], list[str], Optional[str]]
+CommandBatch = Tuple[list[int], list[str], Optional[str], bool]
 LAYOUT_ALIASES = {
     "eh": "even-horizontal",
     "ev": "even-vertical",
@@ -66,7 +66,7 @@ class WindowConfig:
                 if not isinstance(pane_commands, (list, tuple)):
                     raise ValueError("commands list must be a list.")
                 normalized.append(
-                    (pane_indices, [str(cmd) for cmd in pane_commands], None)
+                    (pane_indices, [str(cmd) for cmd in pane_commands], None, True)
                 )
                 continue
 
@@ -82,6 +82,7 @@ class WindowConfig:
                         pane_indices,
                         [str(cmd) for cmd in pane_commands],
                         None if ssh_server is None else str(ssh_server),
+                        True,
                     )
                 )
                 continue
@@ -107,18 +108,21 @@ class WindowConfig:
                 if not ssh_server.strip():
                     raise ValueError("ssh_server cannot be empty")
 
+            use_sentinel = bool(block.get("sentinel", True))
+
             normalized.append(
                 (
                     pane_indices,
                     [str(cmd) for cmd in pane_commands],
                     ssh_server,
+                    use_sentinel,
                 )
             )
 
         return normalized
 
     def _validate_command_panes(self) -> None:
-        for pane_indices, _, _ in self.commands:
+        for pane_indices, _, _, _ in self.commands:
             for pane_index in pane_indices:
                 if pane_index < 0 or pane_index >= self.num_panes:
                     raise ValueError(f"command pane index {pane_index} is out of range")

@@ -10,7 +10,7 @@ import rich
 
 from .config import SessionConfig
 
-CommandBatch = Tuple[list[int], list[str], Optional[str]]
+CommandBatch = Tuple[list[int], list[str], Optional[str], bool]
 
 
 def tmux_run(
@@ -60,13 +60,13 @@ class Pane:
     def __str__(self):
         return f"{self.index}%{self.uid}"
 
-    async def send_keys(self, command: str, enter: bool = True, timeout: float = 1800.0) -> None:
-        """Send keys to this pane and wait for completion via a sentinel echo."""
+    async def send_keys(self, command: str, enter: bool = True, timeout: float = 1800.0, use_sentinel: bool = True) -> None:
+        """Send keys to this pane and optionally wait for completion via a sentinel echo."""
         cmd = ["send-keys", "-t", f"%{self.uid}", str(command)]
         if enter:
             cmd.append("C-m")
         await tmux_run_async(cmd)
-        if not enter:
+        if not enter or not use_sentinel:
             return
         sentinel = f"__TMUXER_{self._send_count}__"
         self._send_count += 1
@@ -440,22 +440,35 @@ class Service:
         Batches still execute in order — the next batch starts only after
         all panes in the current batch have finished.
         """
-        async def _run_pane(pane, pane_commands, ssh_server):
-            for cmd in pane_commands:
+        async def _run_pane(pane, pane_commands, ssh_server, use_sentinel, is_last_batch):
+            for i, cmd in enumerate(pane_commands):
                 command_text = str(cmd)
                 if ssh_server is not None:
                     remote_command = f"bash -ic {shlex.quote(command_text)}"
                     command_text = f"ssh -n {ssh_server} {shlex.quote(remote_command)}"
-                await pane.send_keys(command_text)
+                is_last_cmd = is_last_batch and (i == len(pane_commands) - 1)
+                await pane.send_keys(command_text, use_sentinel=use_sentinel and not is_last_cmd)
 
         for window_panes, new_panes, command_batches in command_jobs:
             await asyncio.gather(*[
                 window_panes[i].send_keys(f"export IID={i}")
                 for i in range(new_panes)
             ])
-            for pane_indices, pane_commands, ssh_server in command_batches:
+            # Pre-compute the last batch index each pane appears in.
+            last_batch_for_pane: dict[int, int] = {}
+            for batch_idx, (pane_indices, _, _, _) in enumerate(command_batches):
+                for pane_index in pane_indices:
+                    last_batch_for_pane[pane_index] = batch_idx
+
+            for batch_idx, (pane_indices, pane_commands, ssh_server, use_sentinel) in enumerate(command_batches):
                 await asyncio.gather(*[
-                    _run_pane(window_panes[pane_index], pane_commands, ssh_server)
+                    _run_pane(
+                        window_panes[pane_index],
+                        pane_commands,
+                        ssh_server,
+                        use_sentinel,
+                        last_batch_for_pane.get(pane_index) == batch_idx,
+                    )
                     for pane_index in pane_indices
                 ])
 
