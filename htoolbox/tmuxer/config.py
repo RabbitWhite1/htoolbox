@@ -17,6 +17,30 @@ LAYOUT_OPTIONS = set(LAYOUT_ALIASES.values()).union(set(LAYOUT_ALIASES.keys()))
 _COMMAND_BATCH_FIELDS = {"pane_index", "commands", "ssh_server", "sentinel"}
 _WINDOW_CONFIG_FIELDS = {"window", "num_panes", "layout", "focus_pane", "commands", "kill", "ssh_server"}
 _SESSION_CONFIG_FIELDS = {"session", "focus_window", "windows", "kill"}
+_PANE_INDEX_ALLOWED_FORMATS = "int, list[int], or string specs like '0', '0-2', '0,2'"
+
+
+class FieldParseError(ValueError):
+    """Raised when a config field cannot be parsed from user input."""
+
+    _PYSTRING_HINT = (
+        "If this is a Python expression, wrap it as a py-string: py`...` "
+        "(for example: py`list(range(3))`)."
+    )
+
+    def __init__(
+        self,
+        field: str,
+        message: str | None = None,
+        allowed: str | None = None,
+    ):
+        base = (message or f"Invalid value for field '{field}'").strip().rstrip(".")
+        allowed_line = (
+            f"Allowed types/formats for '{field}': {allowed}."
+            if allowed
+            else f"Allowed types/formats for '{field}': <unspecified>."
+        )
+        super().__init__("\n".join([base + ".", allowed_line, self._PYSTRING_HINT]))
 
 
 def _check_unknown_fields(data: dict, allowed: set, context: str) -> None:
@@ -38,16 +62,27 @@ def _eval_pstring(value, *expected_types: type, field: str = ""):
     try:
         result = eval(expr)  # noqa: S307
     except Exception as exc:
-        raise ValueError(
-            f"py-string eval failed for {expr!r}\n  {type(exc).__name__}: {exc}"
+        target_field = field or "value"
+        raise FieldParseError(
+            target_field,
+            f"py-string eval failed for {expr!r}: {type(exc).__name__}: {exc}",
         ) from None
     if expected_types and not isinstance(result, expected_types):
         type_names = " or ".join(t.__name__ for t in expected_types)
-        field_hint = f" (field: {field!r})" if field else ""
-        raise ValueError(
-            f"py-string {expr!r} returned {type(result).__name__}, expected {type_names}{field_hint}"
+        target_field = field or "value"
+        raise FieldParseError(
+            target_field,
+            f"py-string {expr!r} returned {type(result).__name__}",
+            allowed=type_names,
         )
     return result
+
+
+def _parse_int_field(value, field: str) -> int:
+    parsed = _eval_pstring(value, int, field=field)
+    if isinstance(parsed, int):
+        return parsed
+    raise FieldParseError(field, f"Invalid integer value {parsed!r}", allowed="int")
 
 
 @dataclass
@@ -113,35 +148,73 @@ class CommandBatch:
 
         if isinstance(pane_spec, list):
             if not pane_spec:
-                raise ValueError("pane_index arrays cannot be empty")
+                raise FieldParseError(
+                    "pane_index",
+                    "pane_index arrays cannot be empty",
+                    allowed=_PANE_INDEX_ALLOWED_FORMATS,
+                )
             if not all(isinstance(v, int) for v in pane_spec):
-                raise ValueError("pane_index entries must be integers")
+                raise FieldParseError(
+                    "pane_index",
+                    "pane_index entries must be integers",
+                    allowed=_PANE_INDEX_ALLOWED_FORMATS,
+                )
             return sorted(set(pane_spec))
 
         if isinstance(pane_spec, str):
             pane_spec = pane_spec.strip()
             if not pane_spec:
-                raise ValueError("pane_index string cannot be empty")
+                raise FieldParseError(
+                    "pane_index",
+                    "pane_index string cannot be empty",
+                    allowed=_PANE_INDEX_ALLOWED_FORMATS,
+                )
             indices: list[int] = []
             for segment in (seg.strip() for seg in pane_spec.split(",") if seg.strip()):
                 if "-" in segment:
                     parts = segment.split("-", 1)
                     if len(parts) != 2 or not parts[0] or not parts[1]:
-                        raise ValueError(f"Invalid pane range '{segment}'")
-                    start, end = int(parts[0]), int(parts[1])
+                        raise FieldParseError(
+                            "pane_index",
+                            f"Invalid pane range '{segment}'",
+                            allowed=_PANE_INDEX_ALLOWED_FORMATS,
+                        )
+                    try:
+                        start, end = int(parts[0]), int(parts[1])
+                    except ValueError:
+                        raise FieldParseError(
+                            "pane_index",
+                            f"Invalid pane range '{segment}'",
+                            allowed=_PANE_INDEX_ALLOWED_FORMATS,
+                        ) from None
                     if start > end:
-                        raise ValueError(
-                            f"pane range start must be <= end in '{segment}'"
+                        raise FieldParseError(
+                            "pane_index",
+                            f"pane range start must be <= end in '{segment}'",
+                            allowed=_PANE_INDEX_ALLOWED_FORMATS,
                         )
                     indices.extend(range(start, end + 1))
                 else:
-                    indices.append(int(segment))
+                    try:
+                        indices.append(int(segment))
+                    except ValueError:
+                        raise FieldParseError(
+                            "pane_index",
+                            f"Invalid pane_index value '{segment}'",
+                            allowed=_PANE_INDEX_ALLOWED_FORMATS,
+                        ) from None
             if not indices:
-                raise ValueError("pane_index string must resolve to at least one pane")
+                raise FieldParseError(
+                    "pane_index",
+                    "pane_index string must resolve to at least one pane",
+                    allowed=_PANE_INDEX_ALLOWED_FORMATS,
+                )
             return sorted(set(indices))
 
-        raise ValueError(
-            "pane_index must be int, list of ints, or a string specification"
+        raise FieldParseError(
+            "pane_index",
+            "pane_index must be int, list of ints, or a string specification",
+            allowed=_PANE_INDEX_ALLOWED_FORMATS,
         )
 
 
@@ -156,7 +229,7 @@ class WindowConfig:
 
     def __post_init__(self):
         self.window = _eval_pstring(self.window, str, field="window")
-        self.num_panes = int(_eval_pstring(self.num_panes, int, field="num_panes"))
+        self.num_panes = _parse_int_field(self.num_panes, "num_panes")
         if self.num_panes < 1:
             raise ValueError("Number of new panes must be at least 1")
 
@@ -176,9 +249,7 @@ class WindowConfig:
         if self.focus_pane is None:
             self.focus_pane = 0
         else:
-            self.focus_pane = int(
-                _eval_pstring(self.focus_pane, int, field="focus_pane")
-            )
+            self.focus_pane = _parse_int_field(self.focus_pane, "focus_pane")
 
         self.commands = self._validate_commands(self.commands)
 
@@ -230,9 +301,7 @@ class SessionConfig:
         if self.focus_window is None:
             self.focus_window = 0
         else:
-            self.focus_window = int(
-                _eval_pstring(self.focus_window, int, field="focus_window")
-            )
+            self.focus_window = _parse_int_field(self.focus_window, "focus_window")
 
         if not isinstance(self.windows, list) or not self.windows:
             raise ValueError("windows must be a non-empty list")
