@@ -28,7 +28,7 @@ PLACEHOLDER_CONFIG_YAML = """# An example tmuxer config file.
 #   2. Py-strings (py`<expr>`) are evaluated after placeholder substitution.
 #      Supported fields: num_panes, focus_pane, focus_window, pane_index.
 # ssh_server mode: commands will all be quoted and prefixed with ssh <server> to run remotely.
-    Thus, environment variables and other local shell features will not work in this mode.
+#   Thus, environment variables and other local shell features will not work in this mode.
 #
 session: devbox
 focus_window: 1
@@ -100,7 +100,9 @@ def _load_config(config: Path, placeholders: Dict[str, str]):
 
 
 def _apply_placeholders(text: str, placeholders: Dict[str, str]) -> str:
-    rendered = text
+    rendered = "\n".join(
+        line for line in text.splitlines() if not line.lstrip().startswith("#")
+    )
     for name, value in placeholders.items():
         rendered = rendered.replace(f"@@{name}@@", str(value))
 
@@ -109,9 +111,7 @@ def _apply_placeholders(text: str, placeholders: Dict[str, str]) -> str:
         formatted = "; ".join(
             f"@@{name}@@ (use -P {name}=VALUE)" for name in unresolved
         )
-        raise ValueError(
-            f"Missing placeholder value(s): {formatted}."
-        )
+        raise ValueError(f"Missing placeholder value(s): {formatted}.")
 
     return rendered
 
@@ -222,7 +222,13 @@ def main():
         else:
             args.config = Path(args.config).expanduser()
             if not args.config.is_file():
-                answer = input(f"Config file not found. Create template at {args.config}? [y/n] ").strip().lower()
+                answer = (
+                    input(
+                        f"Config file not found. Create template at {args.config}? [y/n] "
+                    )
+                    .strip()
+                    .lower()
+                )
                 if answer == "y":
                     _write_placeholder_config(args.config)
                     print(f"Template created at: {args.config}")

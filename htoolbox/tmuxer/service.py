@@ -58,7 +58,13 @@ class Pane:
     def __str__(self):
         return f"{self.index}%{self.uid}"
 
-    async def send_keys(self, command: str, enter: bool = True, timeout: float = 1800.0, use_sentinel: bool = True) -> None:
+    async def send_keys(
+        self,
+        command: str,
+        enter: bool = True,
+        timeout: float = 1800.0,
+        use_sentinel: bool = True,
+    ) -> None:
         """Send keys to this pane and optionally wait for completion via a sentinel echo."""
         cmd = ["send-keys", "-t", f"%{self.uid}", str(command)]
         if enter:
@@ -85,24 +91,33 @@ class Pane:
         """
         deadline = asyncio.get_event_loop().time() + timeout
         last_ping = float("-inf")
-        ping_interval = 8.0
+        ping_interval = 2.0
+        pings_per_level = 1
+        pings_this_level = 0
         while asyncio.get_event_loop().time() < deadline:
             now = asyncio.get_event_loop().time()
             if now - last_ping >= ping_interval:
-                await tmux_run_async(["send-keys", "-t", f"%{self.uid}", f"echo {sentinel}", "C-m"])
+                await tmux_run_async(
+                    ["send-keys", "-t", f"%{self.uid}", f"echo {sentinel}", "C-m"]
+                )
                 last_ping = now
-                ping_interval = min(ping_interval * 2, 128.0)
+                pings_this_level += 1
+                if pings_this_level >= pings_per_level:
+                    ping_interval *= 2
+                    pings_per_level += 1
+                    pings_this_level = 0
             result = await tmux_run_async(
                 ["capture-pane", "-t", f"%{self.uid}", "-p"],
                 capture_output=True,
             )
             if any(
-                line.strip() == sentinel
-                for line in (result.stdout or "").splitlines()
+                line.strip() == sentinel for line in (result.stdout or "").splitlines()
             ):
                 return
             await asyncio.sleep(0.05)
-        rich.print(f"[yellow]Warning:[/yellow] timed out waiting for pane %{self.uid} after {timeout}s")
+        rich.print(
+            f"[yellow]Warning:[/yellow] timed out waiting for pane %{self.uid} after {timeout}s"
+        )
 
     def select(self) -> None:
         """Select this pane as active."""
@@ -422,7 +437,9 @@ class Service:
                 window.select_layout(window_cfg.layout)
 
             window_panes = {pane.index: pane for pane in window.panes(refresh=True)}
-            command_jobs.append((window_panes, window_cfg.num_panes, window_cfg.commands))
+            command_jobs.append(
+                (window_panes, window_cfg.num_panes, window_cfg.commands)
+            )
             window.pane_by_index(int(window_cfg.focus_pane), refresh=True).select()
 
         if focus_window < 0 or focus_window >= len(created_windows):
@@ -438,20 +455,31 @@ class Service:
         Batches still execute in order — the next batch starts only after
         all panes in the current batch have finished.
         """
-        async def _run_pane(pane, pane_commands, ssh_server, use_sentinel, is_last_batch):
+
+        async def _run_pane(
+            pane: Pane,
+            pane_commands: list,
+            ssh_server: Optional[str],
+            use_sentinel: bool,
+            is_last_batch: bool,
+        ):
             for i, cmd in enumerate(pane_commands):
                 command_text = str(cmd)
                 if ssh_server is not None:
                     remote_command = f"bash -ic {shlex.quote(command_text)}"
                     command_text = f"ssh -n {ssh_server} {shlex.quote(remote_command)}"
                 is_last_cmd = is_last_batch and (i == len(pane_commands) - 1)
-                await pane.send_keys(command_text, use_sentinel=use_sentinel and not is_last_cmd)
+                await pane.send_keys(
+                    command_text, use_sentinel=use_sentinel and not is_last_cmd
+                )
 
         for window_panes, new_panes, command_batches in command_jobs:
-            await asyncio.gather(*[
-                window_panes[i].send_keys(f"export IID={i} NUM_PANES={new_panes}")
-                for i in range(new_panes)
-            ])
+            await asyncio.gather(
+                *[
+                    window_panes[i].send_keys(f"export IID={i} NUM_PANES={new_panes}")
+                    for i in range(new_panes)
+                ]
+            )
             # Pre-compute the last batch index each pane appears in.
             last_batch_for_pane: dict[int, int] = {}
             for batch_idx, batch in enumerate(command_batches):
@@ -459,16 +487,18 @@ class Service:
                     last_batch_for_pane[pane_index] = batch_idx
 
             for batch_idx, batch in enumerate(command_batches):
-                await asyncio.gather(*[
-                    _run_pane(
-                        window_panes[pane_index],
-                        batch.commands,
-                        batch.ssh_server,
-                        batch.use_sentinel,
-                        last_batch_for_pane.get(pane_index) == batch_idx,
-                    )
-                    for pane_index in batch.pane_indices
-                ])
+                await asyncio.gather(
+                    *[
+                        _run_pane(
+                            window_panes[pane_index],
+                            batch.commands,
+                            batch.ssh_server,
+                            batch.use_sentinel,
+                            last_batch_for_pane.get(pane_index) == batch_idx,
+                        )
+                        for pane_index in batch.pane_indices
+                    ]
+                )
 
     def __str__(self):
         items = []

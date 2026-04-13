@@ -4,12 +4,31 @@ import re
 from dataclasses import dataclass, field
 from typing import Optional
 
-_PSTRING_RE = re.compile(r'^py`(.*)`$', re.DOTALL)
+
+LAYOUT_ALIASES = {
+    "eh": "even-horizontal",
+    "ev": "even-vertical",
+    "mh": "main-horizontal",
+    "mv": "main-vertical",
+    "t": "tiled",
+}
+LAYOUT_OPTIONS = set(LAYOUT_ALIASES.values()).union(set(LAYOUT_ALIASES.keys()))
+
+_COMMAND_BATCH_FIELDS = {"pane_index", "commands", "ssh_server", "sentinel"}
+_WINDOW_CONFIG_FIELDS = {"window", "num_panes", "layout", "focus_pane", "commands", "kill", "ssh_server"}
+_SESSION_CONFIG_FIELDS = {"session", "focus_window", "windows", "kill"}
 
 
-def _eval_pstring(value):
-    """If *value* is a p-string like py`<expr>`, evaluate and return the result.
-    Otherwise return *value* unchanged."""
+def _check_unknown_fields(data: dict, allowed: set, context: str) -> None:
+    unknown = set(data) - allowed
+    if unknown:
+        raise ValueError(f"Unknown fields in {context}: {', '.join(sorted(unknown))}")
+_PSTRING_RE = re.compile(r"^py`(.*)`$", re.DOTALL)
+
+
+def _eval_pstring(value, *expected_types: type, field: str = ""):
+    """Evaluate py`<expr>` strings. Non-p-string values are returned unchanged.
+    If expected_types are given, the eval result must match one of them."""
     if not isinstance(value, str):
         return value
     m = _PSTRING_RE.match(value.strip())
@@ -17,9 +36,19 @@ def _eval_pstring(value):
         return value
     expr = m.group(1)
     try:
-        return eval(expr)  # noqa: S307
+        result = eval(expr)  # noqa: S307
     except Exception as exc:
-        raise ValueError(f"py-string eval failed for: {expr!r}\n  {type(exc).__name__}: {exc}") from None
+        raise ValueError(
+            f"py-string eval failed for {expr!r}\n  {type(exc).__name__}: {exc}"
+        ) from None
+    if expected_types and not isinstance(result, expected_types):
+        type_names = " or ".join(t.__name__ for t in expected_types)
+        field_hint = f" (field: {field!r})" if field else ""
+        raise ValueError(
+            f"py-string {expr!r} returned {type(result).__name__}, expected {type_names}{field_hint}"
+        )
+    return result
+
 
 @dataclass
 class CommandBatch:
@@ -29,9 +58,13 @@ class CommandBatch:
     use_sentinel: bool
 
     def __post_init__(self):
-        if not isinstance(self.pane_indices, list) or not all(isinstance(i, int) for i in self.pane_indices):
+        if not isinstance(self.pane_indices, list) or not all(
+            isinstance(i, int) for i in self.pane_indices
+        ):
             raise TypeError("pane_indices must be a list of ints")
-        if not isinstance(self.commands, list) or not all(isinstance(c, str) for c in self.commands):
+        if not isinstance(self.commands, list) or not all(
+            isinstance(c, str) for c in self.commands
+        ):
             raise TypeError("commands must be a list of strings")
         if self.ssh_server is not None and not isinstance(self.ssh_server, str):
             raise TypeError("ssh_server must be a string or None")
@@ -42,26 +75,29 @@ class CommandBatch:
     def from_dict(cls, data: dict, idx: int = 0) -> "CommandBatch":
         if not isinstance(data, dict):
             raise ValueError(f"Command block #{idx + 1} must be a dict")
+        _check_unknown_fields(data, _COMMAND_BATCH_FIELDS, f"command block #{idx + 1}")
 
         pane_spec = data.get("pane_index")
         if pane_spec is None:
             raise ValueError("Each command block requires a pane_index")
 
-        pane_commands = data.get("commands")
+        pane_commands = _eval_pstring(data.get("commands"), list, field="commands")
         if not isinstance(pane_commands, list):
-            raise ValueError("commands list must be a list.")
+            raise ValueError("commands must be a list.")
 
-        ssh_server = data.get("ssh_server")
-        if ssh_server is not None:
-            ssh_server = str(ssh_server)
-            if not ssh_server.strip():
-                raise ValueError("ssh_server cannot be empty")
+        ssh_server = _eval_pstring(data.get("ssh_server"), str, field="ssh_server")
+        if ssh_server is not None and not ssh_server.strip():
+            raise ValueError("ssh_server cannot be empty")
 
         return cls(
             pane_indices=cls._parse_pane_indices(pane_spec),
-            commands=[str(cmd) for cmd in pane_commands],
+            commands=[
+                _eval_pstring(cmd, str, field="commands[]") for cmd in pane_commands
+            ],
             ssh_server=ssh_server,
-            use_sentinel=bool(data.get("sentinel", True)),
+            use_sentinel=bool(
+                _eval_pstring(data.get("sentinel", True), bool, field="sentinel")
+            ),
         )
 
     def validate_panes(self, num_panes: int) -> None:
@@ -71,7 +107,7 @@ class CommandBatch:
 
     @staticmethod
     def _parse_pane_indices(pane_spec) -> list[int]:
-        pane_spec = _eval_pstring(pane_spec)
+        pane_spec = _eval_pstring(pane_spec, int, str, list, field="pane_index")
         if isinstance(pane_spec, int):
             return [pane_spec]
 
@@ -94,7 +130,9 @@ class CommandBatch:
                         raise ValueError(f"Invalid pane range '{segment}'")
                     start, end = int(parts[0]), int(parts[1])
                     if start > end:
-                        raise ValueError(f"pane range start must be <= end in '{segment}'")
+                        raise ValueError(
+                            f"pane range start must be <= end in '{segment}'"
+                        )
                     indices.extend(range(start, end + 1))
                 else:
                     indices.append(int(segment))
@@ -102,20 +140,9 @@ class CommandBatch:
                 raise ValueError("pane_index string must resolve to at least one pane")
             return sorted(set(indices))
 
-        raise ValueError("pane_index must be int, list of ints, or a string specification")
-
-
-LAYOUT_ALIASES = {
-    "eh": "even-horizontal",
-    "ev": "even-vertical",
-    "mh": "main-horizontal",
-    "mv": "main-vertical",
-    "t": "tiled",
-}
-LAYOUT_OPTIONS = set(LAYOUT_ALIASES.values()).union(set(LAYOUT_ALIASES.keys()))
-
-_WINDOW_CONFIG_FIELDS = {"window", "num_panes", "layout", "focus_pane", "commands", "kill", "ssh_server"}
-_SESSION_CONFIG_FIELDS = {"session", "focus_window", "windows", "kill"}
+        raise ValueError(
+            "pane_index must be int, list of ints, or a string specification"
+        )
 
 
 @dataclass
@@ -128,22 +155,30 @@ class WindowConfig:
     kill: bool = False
 
     def __post_init__(self):
-        self.num_panes = int(_eval_pstring(self.num_panes))
+        self.window = _eval_pstring(self.window, str, field="window")
+        self.num_panes = int(_eval_pstring(self.num_panes, int, field="num_panes"))
         if self.num_panes < 1:
             raise ValueError("Number of new panes must be at least 1")
 
-        value = str(self.layout).lower().strip()
+        self.layout = _eval_pstring(self.layout, str, field="layout")
+        value = self.layout.lower().strip()
         if value in LAYOUT_ALIASES:
             self.layout = LAYOUT_ALIASES[value]
         elif value in LAYOUT_ALIASES.values():
             self.layout = value
         else:
-            raise ValueError("layout must be one of: " + ", ".join(sorted(LAYOUT_OPTIONS)))
+            raise ValueError(
+                "layout must be one of: " + ", ".join(sorted(LAYOUT_OPTIONS))
+            )
+
+        self.kill = bool(_eval_pstring(self.kill, bool, field="kill"))
 
         if self.focus_pane is None:
             self.focus_pane = 0
         else:
-            self.focus_pane = int(_eval_pstring(self.focus_pane))
+            self.focus_pane = int(
+                _eval_pstring(self.focus_pane, int, field="focus_pane")
+            )
 
         self.commands = self._validate_commands(self.commands)
 
@@ -155,25 +190,23 @@ class WindowConfig:
             return []
         if not isinstance(value, list):
             raise ValueError("commands section must be a list of command blocks")
-        batches = [CommandBatch.from_dict(block, idx) for idx, block in enumerate(value)]
+        batches = [
+            CommandBatch.from_dict(block, idx) for idx, block in enumerate(value)
+        ]
         for batch in batches:
             batch.validate_panes(self.num_panes)
         return batches
 
     @classmethod
     def from_dict(cls, data: dict) -> "WindowConfig":
-        unknown = set(data) - _WINDOW_CONFIG_FIELDS
-        if unknown:
-            raise ValueError(
-                f"Unknown fields in window config: {', '.join(sorted(unknown))}"
-            )
+        _check_unknown_fields(data, _WINDOW_CONFIG_FIELDS, "window config")
         return cls(
             window=data.get("window"),
             num_panes=data["num_panes"],
             layout=data.get("layout", "even-vertical"),
             focus_pane=data.get("focus_pane", 0),
             commands=data.get("commands", []),
-            kill=bool(data.get("kill", False)),
+            kill=data.get("kill", False),
         )
 
 
@@ -185,16 +218,21 @@ class SessionConfig:
     kill: bool = False
 
     def __post_init__(self):
-        if self.session is None:
-            raise ValueError("session must be a non-empty string")
-        self.session = str(self.session).strip()
+        self.session = _eval_pstring(self.session, str, field="session")
         if not self.session:
             raise ValueError("session must be a non-empty string")
+        self.session = self.session.strip()
+        if not self.session:
+            raise ValueError("session must be a non-empty string")
+
+        self.kill = bool(_eval_pstring(self.kill, bool, field="kill"))
 
         if self.focus_window is None:
             self.focus_window = 0
         else:
-            self.focus_window = int(_eval_pstring(self.focus_window))
+            self.focus_window = int(
+                _eval_pstring(self.focus_window, int, field="focus_window")
+            )
 
         if not isinstance(self.windows, list) or not self.windows:
             raise ValueError("windows must be a non-empty list")
@@ -204,24 +242,19 @@ class SessionConfig:
 
     @classmethod
     def from_dict(cls, data: dict) -> "SessionConfig":
-        unknown = set(data) - _SESSION_CONFIG_FIELDS
-        if unknown:
-            raise ValueError(
-                f"Unknown fields in session config: {', '.join(sorted(unknown))}"
-            )
+        _check_unknown_fields(data, _SESSION_CONFIG_FIELDS, "session config")
 
         raw_windows = data.get("windows")
         if not isinstance(raw_windows, list) or not raw_windows:
             raise ValueError("windows must be a non-empty list")
 
         windows = [
-            WindowConfig.from_dict(w) if isinstance(w, dict) else w
-            for w in raw_windows
+            WindowConfig.from_dict(w) if isinstance(w, dict) else w for w in raw_windows
         ]
 
         return cls(
             session=data.get("session"),
             focus_window=data.get("focus_window", 0),
             windows=windows,
-            kill=bool(data.get("kill", False)),
+            kill=data.get("kill", False),
         )
