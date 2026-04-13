@@ -124,7 +124,9 @@ def main():
 
     with MyProgress() as progress, mp.Manager() as manager:
         _progress = manager.dict()
-        overall_progress_task = progress.add_task("[green]All jobs progress:", progress_type="overview")
+        overall_progress_task = progress.add_task(
+            "[green]All jobs progress:", progress_type="overview"
+        )
         pool = mp.Pool(processes=args.num_processes)
         results = []
         tasks = []
@@ -143,7 +145,9 @@ def main():
             for result in results:
                 if result.ready():
                     ready_count += 1
-            progress.update(overall_progress_task, completed=ready_count, total=len(results))
+            progress.update(
+                overall_progress_task, completed=ready_count, total=len(results)
+            )
             for task_id, update_data in _progress.items():
                 latest = update_data["progress"]
                 total = update_data["total"]

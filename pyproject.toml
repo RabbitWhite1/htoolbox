@@ -1,6 +1,6 @@
 [project]
 name = "htoolbox"
-version = "0.9.14"
+version = "0.9.15"
 description = "This package includes various tools for developers."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -11,6 +11,11 @@ dependencies = [
     "pyyaml>=6.0.3",
     "rich>=14.2.0",
     "wget>=3.2",
+]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.15.9",
 ]
 
 [project.scripts]
@@ -31,3 +36,10 @@ script-files = [
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["htoolbox*"]
+
+[tool.ruff.lint]
+ignore = [
+    "F401", # Ignore unused imports
+    "F403", # Ignore 'from module import *' used
+    "F841", # Ignore unused variables
+]
