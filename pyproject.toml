@@ -37,6 +37,9 @@ script-files = [
 where = ["."]
 include = ["htoolbox*"]
 
+[tool.uv]
+default-groups = []
+
 [tool.ruff.lint]
 ignore = [
     "F401", # Ignore unused imports
