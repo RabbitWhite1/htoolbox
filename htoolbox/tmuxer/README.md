@@ -147,32 +147,81 @@ Fields:
   Set to `false` for fire-and-forget commands that block indefinitely (e.g. `ssh <server>`, `htop`).
   The very last command a pane will run never sends a sentinel regardless of this flag.
 
+## Extended Runtime Behavior Notes
+
+1. Load + prepare config.
+  1. Load file: auto or `--config`.
+  2. Apply placeholders: `@@name@@` from `--placeholder name=value` (see [Placeholders](#placeholders)).
+  3. Missing placeholder: stop, error, no tmux changes.
+  4. Eval py-strings (see [Py-Strings](#py-strings)).
+
+2. Build session, windows, panes.
+  1. Session step: check `session`; if `kill: true`, kill old session first.
+  2. Window spawn: process `windows` top to bottom; apply window `kill` if set.
+  3. Pane spawn: use `num_panes`; apply `layout`; send `export IID=<pane_index>` to each pane.
+
+3. Run commands.
+  1. Command run: batches in order; target panes from `pane_index`; send via tmux `send-keys`.
+  2. SSH mode (when `ssh_server` set): wrap each command with `ssh -n <ssh_server> 'bash -ic "<command>"'` (see [Work with SSH](#work-with-ssh)).
+  3. Sync mode: `sentinel: true` wait; `sentinel: false` no wait, continue.
+
+4. Set final focus.
+  1. Per-window `focus_pane` during setup.
+  2. Top-level `focus_window` at end.
+
+## Special Usage
+
 ### Py-Strings
 
-Any field that accepts an integer or pane selector also accepts a **py-string**: an expression
-wrapped in `` py`...` `` that is evaluated with Python's `eval()` after placeholder substitution.
+Most config fields accept a **py-string**: an expression wrapped in `` py`...` ``.
+Evaluation runs after placeholder substitution.
 
 ```yaml
 num_panes: py`2 + 2`
 focus_window: py`int(os.environ.get("WIN", 0))`
+kill: py`True`
+layout: py`"ev"`
 
 commands:
   - pane_index: py`list(range(4))`
+    ssh_server: py`"user@host"`
     commands:
-      - bash
+      - py`"echo hello"`
 ```
 
-Fields that support py-strings: `num_panes`, `focus_pane`, `focus_window`, `pane_index`.
+Common fields with py-string support:
+- session/window fields: `session`, `window`, `num_panes`, `layout`, `focus_pane`, `focus_window`, `kill`
+- command block fields: `pane_index`, `commands`, `commands[]`, `ssh_server`, `sentinel`
 
-### Runtime Behavior Notes
+Notes:
+- py-string result type must match field type (e.g. `kill` -> bool, `num_panes` -> int).
+- `pane_index` py-strings may return `int`, `str`, or `list[int]`.
 
-- For each pane in each window, `tmuxer` first sends `export IID=<pane_index>`.
-- Window setup is done in the same order as `windows` in YAML.
-- The final focused location is:
-  1. each window's `focus_pane` during setup
-  2. then top-level `focus_window`
+### Placeholders
 
-### Full Example
+Configs may contain placeholder tokens such as `@@workdir@@`. Provide values with one or more
+`--placeholder workdir=/tmp/foo` flags. Each token is replaced via string substitution before the
+config is parsed, and placeholders can be used in both YAML and JSON configs.
+If any placeholder token remains unresolved, `tmuxer` prints an error and exits.
+
+You can try:
+
+```sh
+cd htoolbox/tmux
+tmuxer -c .tmuxer.placeholder.yaml -P somedir=/usr
+```
+
+### Work with SSH
+
+When specifying `ssh_server` in the item of the list of commands for a window, the command will be automatically wrapped like
+```
+ssh -n <ssh_server> 'bash -ic "<command>"'
+```
+
+You don't need to worry about quotes, because `shlex.quote` handles the nested quotes.
+
+
+## Full Example
 
 ```yaml
 session: devbox
@@ -221,30 +270,4 @@ Run with placeholders:
 tmuxer -c .tmuxer.yaml -P workdir=$HOME
 ```
 
-### Placeholders
-
-Configs may contain placeholder tokens such as `@@workdir@@`. Provide values with one or more
-`--placeholder workdir=/tmp/foo` flags. Each token is replaced via string substitution before the
-config is parsed, and placeholders can be used in both YAML and JSON configs.
-If any placeholder token remains unresolved, `tmuxer` prints an error and exits.
-
-You can try:
-
-```sh
-cd htoolbox/tmux
-tmuxer -c .tmuxer.placeholder.yaml -P somedir=/usr
-```
-
-### Work with SSH
-
-When specifying `ssh_server` in the item of the list of commands for a window, the command will be automatically wrapped like
-```
-ssh -n <ssh_server> 'bash -ic "<command>"'
-```
-
-You don't need to worry about quotes, because `shlex.quote` handles the nested quotes.
-
-### Known issues
-
-- When running commands with sudo, it eats all following stdin. Thus we recommend using ssh_server to run a command requiring `sudo`
-- After ssh into a server, `exit` works, but will eat following commands
+## Known issues

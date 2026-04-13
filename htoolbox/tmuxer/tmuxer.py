@@ -26,7 +26,7 @@ PLACEHOLDER_CONFIG_YAML = """# An example tmuxer config file.
 # Evaluation order:
 #   1. Placeholders (@@name@@) are substituted first via -P name=value flags.
 #   2. Py-strings (py`<expr>`) are evaluated after placeholder substitution.
-#      Supported fields: num_panes, focus_pane, focus_window, pane_index.
+#      Supported in most config fields (type-checked per field).
 # ssh_server mode: commands will all be quoted and prefixed with ssh <server> to run remotely.
 #   Thus, environment variables and other local shell features will not work in this mode.
 #
