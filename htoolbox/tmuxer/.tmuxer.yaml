@@ -3,7 +3,7 @@ focus_window: 1
 kill: true
 windows:
   - window: workspace
-    num_panes: 3
+    num_panes: py`2 + 1`   # evaluated to 3
     layout: ev
     focus_pane: 0
     kill: true
@@ -19,7 +19,9 @@ windows:
         commands:
           - cd @@workdir@@
           - ls -la
+      # sentinel: false — send the command and move on without waiting
       - pane_index: "2"
+        sentinel: false
         commands:
           - top
   - window: monitoring

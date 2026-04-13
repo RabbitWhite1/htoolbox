@@ -4,13 +4,11 @@ import asyncio
 import re
 import shlex
 import subprocess
-from typing import Optional, Tuple
+from typing import Optional
 
 import rich
 
-from .config import SessionConfig
-
-CommandBatch = Tuple[list[int], list[str], Optional[str], bool]
+from .config import CommandBatch, SessionConfig
 
 
 def tmux_run(
@@ -451,25 +449,25 @@ class Service:
 
         for window_panes, new_panes, command_batches in command_jobs:
             await asyncio.gather(*[
-                window_panes[i].send_keys(f"export IID={i}")
+                window_panes[i].send_keys(f"export IID={i} NUM_PANES={new_panes}")
                 for i in range(new_panes)
             ])
             # Pre-compute the last batch index each pane appears in.
             last_batch_for_pane: dict[int, int] = {}
-            for batch_idx, (pane_indices, _, _, _) in enumerate(command_batches):
-                for pane_index in pane_indices:
+            for batch_idx, batch in enumerate(command_batches):
+                for pane_index in batch.pane_indices:
                     last_batch_for_pane[pane_index] = batch_idx
 
-            for batch_idx, (pane_indices, pane_commands, ssh_server, use_sentinel) in enumerate(command_batches):
+            for batch_idx, batch in enumerate(command_batches):
                 await asyncio.gather(*[
                     _run_pane(
                         window_panes[pane_index],
-                        pane_commands,
-                        ssh_server,
-                        use_sentinel,
+                        batch.commands,
+                        batch.ssh_server,
+                        batch.use_sentinel,
                         last_batch_for_pane.get(pane_index) == batch_idx,
                     )
-                    for pane_index in pane_indices
+                    for pane_index in batch.pane_indices
                 ])
 
     def __str__(self):

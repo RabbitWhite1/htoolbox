@@ -22,6 +22,14 @@ CONFIG_CANDIDATES = (
     ".tmuxer.yml",
 )
 PLACEHOLDER_CONFIG_YAML = """# An example tmuxer config file.
+#
+# Evaluation order:
+#   1. Placeholders (@@name@@) are substituted first via -P name=value flags.
+#   2. Py-strings (py`<expr>`) are evaluated after placeholder substitution.
+#      Supported fields: num_panes, focus_pane, focus_window, pane_index.
+# ssh_server mode: commands will all be quoted and prefixed with ssh <server> to run remotely.
+    Thus, environment variables and other local shell features will not work in this mode.
+#
 session: devbox
 focus_window: 1
 kill: true
@@ -214,10 +222,13 @@ def main():
         else:
             args.config = Path(args.config).expanduser()
             if not args.config.is_file():
-                _write_placeholder_config(args.config)
-                raise FileNotFoundError(
-                    f"Config file not found. Placeholder created at: {args.config}"
-                )
+                answer = input(f"Config file not found. Create template at {args.config}? [y/n] ").strip().lower()
+                if answer == "y":
+                    _write_placeholder_config(args.config)
+                    print(f"Template created at: {args.config}")
+                else:
+                    print(f"ERROR: Config file not found: {args.config}")
+                return
 
         session_config = session_config_from_args(args)
 

@@ -35,7 +35,7 @@ If `--config` is not provided, `tmuxer` auto-detects the first existing file in 
 - `.tmuxer.yaml`
 - `.tmuxer.yml`
 
-If `--config` is provided but the file does not exist, a placeholder YAML file is created at that path and `tmuxer` exits with an error so you can edit it.
+If `--config` is provided but the file does not exist, `tmuxer` asks whether to create a placeholder YAML file at that path, then exits so you can edit it.
 
 Check [.tmuxer.yaml](.tmuxer.yaml) for an example. Try it out by just running:
 
@@ -70,7 +70,7 @@ windows:
 - `session` (string, required)
   Name of the tmux session to create or reuse.
 
-- `focus_window` (integer, optional, default `0`)
+- `focus_window` (integer or py-string, optional, default `0`)
   Index in the `windows` list to focus after setup finishes.
 
 - `kill` (boolean, optional, default `false`)
@@ -85,7 +85,7 @@ windows:
 - `window` (string, optional)
   Window name. If omitted, tmux chooses a default name.
 
-- `num_panes` (integer, optional, default `1`)
+- `num_panes` (integer or py-string, optional, default `1`)
   Number of panes to create in this window.
 
 - `layout` (string, optional, default `even-vertical`)
@@ -94,7 +94,7 @@ windows:
   - Full names: `even-horizontal`, `even-vertical`, `main-horizontal`, `main-vertical`, `tiled`
   - Aliases: `eh`, `ev`, `mh`, `mv`, `t`
 
-- `focus_pane` (integer, optional, default `0`)
+- `focus_pane` (integer or py-string, optional, default `0`)
   Pane index to focus inside this window after configuration.
 
 - `kill` (boolean, optional, default `false`)
@@ -124,12 +124,13 @@ commands:
 
 Fields:
 
-- `pane_index` (string or integer, required)
+- `pane_index` (string, integer, or py-string, required)
   Pane selector.
   Common forms:
   - single pane: `"0"`
   - range: `"0-2"`
-  - list (if supported by parser in `SessionConfig`): e.g. `"0,2"`
+  - comma-separated: `"0,2"`
+  - py-string returning a list: `py`list(range(4))``
 
 - `commands` (list of strings, required)
   Commands sent via tmux `send-keys` (each command is followed by Enter).
@@ -140,6 +141,28 @@ Fields:
   ```text
   ssh -n <ssh_server> 'bash -ic <command>'
   ```
+
+- `sentinel` (boolean, optional, default `true`)
+  When `true`, `tmuxer` waits for each command to finish before sending the next batch.
+  Set to `false` for fire-and-forget commands that block indefinitely (e.g. `ssh <server>`, `htop`).
+  The very last command a pane will run never sends a sentinel regardless of this flag.
+
+### Py-Strings
+
+Any field that accepts an integer or pane selector also accepts a **py-string**: an expression
+wrapped in `` py`...` `` that is evaluated with Python's `eval()` after placeholder substitution.
+
+```yaml
+num_panes: py`2 + 2`
+focus_window: py`int(os.environ.get("WIN", 0))`
+
+commands:
+  - pane_index: py`list(range(4))`
+    commands:
+      - bash
+```
+
+Fields that support py-strings: `num_panes`, `focus_pane`, `focus_window`, `pane_index`.
 
 ### Runtime Behavior Notes
 
@@ -157,7 +180,7 @@ focus_window: 1
 kill: true
 windows:
   - window: workspace
-    num_panes: 3
+    num_panes: py`2 + 1`   # evaluated to 3
     layout: ev
     focus_pane: 0
     kill: true
@@ -173,7 +196,9 @@ windows:
         commands:
           - cd @@workdir@@
           - ls -la
+      # sentinel: false — send the command and move on without waiting
       - pane_index: "2"
+        sentinel: false
         commands:
           - top
   - window: monitoring
