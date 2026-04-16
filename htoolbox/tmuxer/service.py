@@ -4,11 +4,21 @@ import asyncio
 import re
 import shlex
 import subprocess
+from dataclasses import dataclass
 from typing import Optional
 
 import rich
 
 from .config import CommandBatch, SessionConfig
+
+
+@dataclass
+class CommandJob:
+    window_panes: dict[int, "Pane"]
+    num_panes: int
+    command_batches: list[CommandBatch]
+    window: "Window"
+    synchronized_panes: bool
 
 
 def tmux_run(
@@ -401,7 +411,7 @@ class Service:
                 return s
         raise RuntimeError("Failed to create new session")
 
-    def create_session(self, config: SessionConfig) -> tuple[list[tuple], str]:
+    def create_session(self, config: SessionConfig) -> tuple[list[CommandJob], str]:
         """Synchronously create all tmux windows and panes.
 
         Returns (command_jobs, session_name). command_jobs is consumed by
@@ -427,7 +437,7 @@ class Service:
             raise ValueError("At least one window must be provided")
 
         created_windows: list[Window] = []
-        command_jobs: list[tuple] = []
+        command_jobs: list[CommandJob] = []
 
         for window_index, window_cfg in enumerate(windows):
             if window_index == 0:
@@ -453,12 +463,12 @@ class Service:
 
             window_panes = {pane.index: pane for pane in window.panes(refresh=True)}
             command_jobs.append(
-                (
-                    window_panes,
-                    window_cfg.num_panes,
-                    window_cfg.commands,
-                    window,
-                    window_cfg.synchronized_panes,
+                CommandJob(
+                    window_panes=window_panes,
+                    num_panes=window_cfg.num_panes,
+                    command_batches=window_cfg.commands,
+                    window=window,
+                    synchronized_panes=window_cfg.synchronized_panes,
                 )
             )
             window.pane_by_index(int(window_cfg.focus_pane), refresh=True).select()
@@ -469,7 +479,7 @@ class Service:
 
         return command_jobs, session_name
 
-    async def _dispatch_commands(self, command_jobs: list[tuple]) -> None:
+    async def _dispatch_commands(self, command_jobs: list[CommandJob]) -> None:
         """Send all command batches to their panes.
 
         Within each batch, all panes run their commands concurrently.
@@ -494,24 +504,26 @@ class Service:
                     command_text, use_sentinel=use_sentinel and not is_last_cmd
                 )
 
-        for window_panes, new_panes, command_batches, window, sync_panes in command_jobs:
+        for job in command_jobs:
             await asyncio.gather(
                 *[
-                    window_panes[i].send_keys(f"export IID={i} NUM_PANES={new_panes}")
-                    for i in range(new_panes)
+                    job.window_panes[i].send_keys(
+                        f"export IID={i} NUM_PANES={job.num_panes}"
+                    )
+                    for i in range(job.num_panes)
                 ]
             )
             # Pre-compute the last batch index each pane appears in.
             last_batch_for_pane: dict[int, int] = {}
-            for batch_idx, batch in enumerate(command_batches):
+            for batch_idx, batch in enumerate(job.command_batches):
                 for pane_index in batch.pane_indices:
                     last_batch_for_pane[pane_index] = batch_idx
 
-            for batch_idx, batch in enumerate(command_batches):
+            for batch_idx, batch in enumerate(job.command_batches):
                 await asyncio.gather(
                     *[
                         _run_pane(
-                            window_panes[pane_index],
+                            job.window_panes[pane_index],
                             batch.commands,
                             batch.ssh_server,
                             batch.use_sentinel,
@@ -521,8 +533,8 @@ class Service:
                     ]
                 )
 
-            if sync_panes:
-                window.set_synchronize_panes(True)
+            if job.synchronized_panes:
+                job.window.set_synchronize_panes(True)
 
     def __str__(self):
         items = []
