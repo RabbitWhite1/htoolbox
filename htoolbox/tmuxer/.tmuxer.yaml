@@ -1,5 +1,5 @@
 session: devbox
-focus_window: 1
+focus_window: 0
 kill: true
 windows:
   - window: workspace
@@ -7,10 +7,12 @@ windows:
     layout: ev
     focus_pane: 0
     kill: true
+    synchronized_panes: true
     commands:
       - pane_index: "0-1"
         commands:
           - echo "workspace panes ready"
+          - sleep 20 && ls /eee
       - pane_index: "0"
         commands:
           - cd @@workdir@@
