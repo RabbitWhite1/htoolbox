@@ -31,7 +31,7 @@ PLACEHOLDER_CONFIG_YAML = """# An example tmuxer config file.
 #   Thus, environment variables and other local shell features will not work in this mode.
 #
 session: devbox
-focus_window: 1
+focus_window: 0
 kill: true
 windows:
   - window: workspace
