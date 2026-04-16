@@ -104,6 +104,11 @@ windows:
 - `commands` (list, optional)
   Command batches to run in one or multiple panes. See the next section.
 
+- `synchronized_panes` (boolean, optional, default `false`)
+  If `true`, `tmuxer` enables tmux `synchronize-panes` for this window **after** all command
+  batches in the window have finished. It does not affect how the configured commands are
+  dispatched — only subsequent keystrokes you type yourself are broadcast to every pane.
+
 ### Command Batch Format
 
 Each item in `commands` targets one or more panes and runs command lines in sequence.
@@ -146,6 +151,13 @@ Fields:
   When `true`, `tmuxer` waits for each command to finish before sending the next batch.
   Set to `false` for fire-and-forget commands that block indefinitely (e.g. `ssh <server>`, `htop`).
   The very last command a pane will run never sends a sentinel regardless of this flag.
+
+  The sentinel ping runs in the pane as
+  `: "${__TMUXER_N__:=$?}"; echo "__TMUXER_N__ returncode=$__TMUXER_N__"`, which captures the
+  preceding command's exit status into a uniquely-named shell variable on the first ping and
+  re-echoes it on subsequent pings. Pings retry on a 1s → 16s (capped) exponential backoff.
+  Because tmux `send-keys` has no return channel, echoing `$?` back into the pane is the only
+  way to surface the exit code; it appears on-screen alongside the sentinel line.
 
 ## Extended Runtime Behavior Notes
 
@@ -255,6 +267,7 @@ windows:
     layout: tiled
     focus_pane: 0
     kill: true
+    synchronized_panes: true
     commands:
       - pane_index: "0"
         commands:

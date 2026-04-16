@@ -15,7 +15,7 @@ LAYOUT_ALIASES = {
 LAYOUT_OPTIONS = set(LAYOUT_ALIASES.values()).union(set(LAYOUT_ALIASES.keys()))
 
 _COMMAND_BATCH_FIELDS = {"pane_index", "commands", "ssh_server", "sentinel"}
-_WINDOW_CONFIG_FIELDS = {"window", "num_panes", "layout", "focus_pane", "commands", "kill", "ssh_server"}
+_WINDOW_CONFIG_FIELDS = {"window", "num_panes", "layout", "focus_pane", "commands", "kill", "ssh_server", "synchronized_panes"}
 _SESSION_CONFIG_FIELDS = {"session", "focus_window", "windows", "kill"}
 _PANE_INDEX_ALLOWED_FORMATS = "int, list[int], or string specs like '0', '0-2', '0,2'"
 
@@ -226,6 +226,7 @@ class WindowConfig:
     focus_pane: int = 0
     commands: list[CommandBatch] = field(default_factory=list)
     kill: bool = False
+    synchronized_panes: bool = False
 
     def __post_init__(self):
         self.window = _eval_pstring(self.window, str, field="window")
@@ -245,6 +246,9 @@ class WindowConfig:
             )
 
         self.kill = bool(_eval_pstring(self.kill, bool, field="kill"))
+        self.synchronized_panes = bool(
+            _eval_pstring(self.synchronized_panes, bool, field="synchronized_panes")
+        )
 
         if self.focus_pane is None:
             self.focus_pane = 0
@@ -278,6 +282,7 @@ class WindowConfig:
             focus_pane=data.get("focus_pane", 0),
             commands=data.get("commands", []),
             kill=data.get("kill", False),
+            synchronized_panes=data.get("synchronized_panes", False),
         )
 
 

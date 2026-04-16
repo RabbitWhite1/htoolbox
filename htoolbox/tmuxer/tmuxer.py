@@ -39,6 +39,7 @@ windows:
     layout: ev
     focus_pane: 0
     kill: true
+    synchronized_panes: false
     commands:
       - pane_index: "0-1"
         commands:

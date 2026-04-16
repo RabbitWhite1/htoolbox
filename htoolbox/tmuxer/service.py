@@ -77,41 +77,44 @@ class Pane:
         await self._wait_for_sentinel(sentinel, timeout)
 
     async def _wait_for_sentinel(self, sentinel: str, timeout: float) -> None:
-        """Periodically send 'echo <sentinel>' until it appears in capture-pane.
+        """Periodically send a sentinel-echo until it appears in capture-pane.
 
-        Sending the echo on an interval rather than once handles two cases:
+        Each ping runs:
+            : "${SENTINEL:=$?}"; echo "SENTINEL returncode=$SENTINEL"
+        The first ping captures $? of the preceding user command into a shell
+        variable named after the sentinel (tmux send-keys has no return channel,
+        so echoing $? back into the pane is the only way to surface it).
+        Subsequent pings re-echo the same value (the `:=` default is a no-op
+        once the variable is set).
+
+        Ping interval starts at 1s and doubles up to 16s. Sending pings on an
+        interval (rather than once) handles two cases:
         - PTY C-m race: if the first ping races with the command's C-m and gets
           dropped, a later ping will succeed once the PTY has caught up.
         - Interactive commands (e.g. 'ssh <server>'): pings queue up in the PTY
-          and execute as soon as the (remote) shell becomes ready, without needing
-          to know anything about the command type.
-
-        Exact line match avoids false positives from the typed 'echo <sentinel>'
-        input, which also contains 'echo ' and the shell prompt prefix.
+          and execute once the (remote) shell becomes ready.
         """
+        match_re = re.compile(rf"^{re.escape(sentinel)} returncode=\d+$")
+        ping_cmd = f': "${{{sentinel}:=$?}}"; echo "{sentinel} returncode=${sentinel}"'
         deadline = asyncio.get_event_loop().time() + timeout
         last_ping = float("-inf")
-        ping_interval = 2.0
-        pings_per_level = 1
-        pings_this_level = 0
+        ping_interval = 1.0
         while asyncio.get_event_loop().time() < deadline:
             now = asyncio.get_event_loop().time()
             if now - last_ping >= ping_interval:
                 await tmux_run_async(
-                    ["send-keys", "-t", f"%{self.uid}", f"echo {sentinel}", "C-m"]
+                    ["send-keys", "-t", f"%{self.uid}", ping_cmd, "C-m"]
                 )
+                if last_ping != float("-inf"):
+                    ping_interval = min(ping_interval * 2, 16.0)
                 last_ping = now
-                pings_this_level += 1
-                if pings_this_level >= pings_per_level:
-                    ping_interval *= 2
-                    pings_per_level += 1
-                    pings_this_level = 0
             result = await tmux_run_async(
                 ["capture-pane", "-t", f"%{self.uid}", "-p"],
                 capture_output=True,
             )
             if any(
-                line.strip() == sentinel for line in (result.stdout or "").splitlines()
+                match_re.match(line.strip())
+                for line in (result.stdout or "").splitlines()
             ):
                 return
             await asyncio.sleep(0.05)
@@ -166,6 +169,18 @@ class Window:
             if pane.index == pane_index:
                 return pane
         raise ValueError(f"pane index {pane_index} not found in window {self.name}")
+
+    def set_synchronize_panes(self, on: bool) -> None:
+        """Enable or disable tmux synchronize-panes for this window."""
+        tmux_run(
+            [
+                "set-window-option",
+                "-t",
+                f"@{self.uid}",
+                "synchronize-panes",
+                "on" if on else "off",
+            ]
+        )
 
     def kill(self, quiet: bool = True) -> None:
         """Kill this tmux window."""
@@ -438,7 +453,13 @@ class Service:
 
             window_panes = {pane.index: pane for pane in window.panes(refresh=True)}
             command_jobs.append(
-                (window_panes, window_cfg.num_panes, window_cfg.commands)
+                (
+                    window_panes,
+                    window_cfg.num_panes,
+                    window_cfg.commands,
+                    window,
+                    window_cfg.synchronized_panes,
+                )
             )
             window.pane_by_index(int(window_cfg.focus_pane), refresh=True).select()
 
@@ -473,7 +494,7 @@ class Service:
                     command_text, use_sentinel=use_sentinel and not is_last_cmd
                 )
 
-        for window_panes, new_panes, command_batches in command_jobs:
+        for window_panes, new_panes, command_batches, window, sync_panes in command_jobs:
             await asyncio.gather(
                 *[
                     window_panes[i].send_keys(f"export IID={i} NUM_PANES={new_panes}")
@@ -499,6 +520,9 @@ class Service:
                         for pane_index in batch.pane_indices
                     ]
                 )
+
+            if sync_panes:
+                window.set_synchronize_panes(True)
 
     def __str__(self):
         items = []
