@@ -14,7 +14,7 @@ LAYOUT_ALIASES = {
 }
 LAYOUT_OPTIONS = set(LAYOUT_ALIASES.values()).union(set(LAYOUT_ALIASES.keys()))
 
-_COMMAND_BATCH_FIELDS = {"pane_index", "commands", "ssh_server", "sentinel"}
+_COMMAND_BATCH_FIELDS = {"pane_index", "commands", "ssh_server", "sentinel", "stop_on_error"}
 _WINDOW_CONFIG_FIELDS = {"window", "num_panes", "layout", "focus_pane", "commands", "kill", "ssh_server", "synchronized_panes"}
 _SESSION_CONFIG_FIELDS = {"session", "focus_window", "windows", "kill"}
 _PANE_INDEX_ALLOWED_FORMATS = "int, list[int], or string specs like '0', '0-2', '0,2'"
@@ -91,6 +91,7 @@ class CommandBatch:
     commands: list[str]
     ssh_server: Optional[str]
     use_sentinel: bool
+    stop_on_error: bool = False
 
     def __post_init__(self):
         if not isinstance(self.pane_indices, list) or not all(
@@ -132,6 +133,9 @@ class CommandBatch:
             ssh_server=ssh_server,
             use_sentinel=bool(
                 _eval_pstring(data.get("sentinel", True), bool, field="sentinel")
+            ),
+            stop_on_error=bool(
+                _eval_pstring(data.get("stop_on_error", False), bool, field="stop_on_error")
             ),
         )
 
