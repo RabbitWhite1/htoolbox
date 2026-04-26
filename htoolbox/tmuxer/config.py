@@ -14,10 +14,10 @@ LAYOUT_ALIASES = {
 }
 LAYOUT_OPTIONS = set(LAYOUT_ALIASES.values()).union(set(LAYOUT_ALIASES.keys()))
 
-_COMMAND_BATCH_FIELDS = {"pane_index", "commands", "ssh_server", "sentinel", "stop_on_error"}
+_COMMAND_BATCH_FIELDS = {"pane_indices", "commands", "ssh_server", "use_sentinel", "last_sentinel", "stop_on_error"}
 _WINDOW_CONFIG_FIELDS = {"window", "num_panes", "layout", "focus_pane", "commands", "kill", "ssh_server", "synchronized_panes"}
 _SESSION_CONFIG_FIELDS = {"session", "focus_window", "windows", "kill"}
-_PANE_INDEX_ALLOWED_FORMATS = "int, list[int], or string specs like '0', '0-2', '0,2'"
+_PANE_INDEX_ALLOWED_FORMATS = "int, list[int], or string specs like '0', '0-2', '0,2' (field: pane_indices)"
 
 
 class FieldParseError(ValueError):
@@ -89,9 +89,10 @@ def _parse_int_field(value, field: str) -> int:
 class CommandBatch:
     pane_indices: list[int]
     commands: list[str]
-    ssh_server: Optional[str]
-    use_sentinel: bool
+    ssh_server: Optional[str] = None
+    use_sentinel: bool = True
     stop_on_error: bool = False
+    last_sentinel: bool = False
 
     def __post_init__(self):
         if not isinstance(self.pane_indices, list) or not all(
@@ -106,16 +107,26 @@ class CommandBatch:
             raise TypeError("ssh_server must be a string or None")
         if not isinstance(self.use_sentinel, bool):
             raise TypeError("use_sentinel must be a bool")
+        if not isinstance(self.last_sentinel, bool):
+            raise TypeError("last_sentinel must be a bool")
 
     @classmethod
     def from_dict(cls, data: dict, idx: int = 0) -> "CommandBatch":
         if not isinstance(data, dict):
             raise ValueError(f"Command block #{idx + 1} must be a dict")
+        if "pane_index" in data:
+            raise ValueError(
+                f"Command block #{idx + 1}: 'pane_index' was renamed to 'pane_indices'. Please update your config."
+            )
+        if "sentinel" in data:
+            raise ValueError(
+                f"Command block #{idx + 1}: 'sentinel' was renamed to 'use_sentinel'. Please update your config."
+            )
         _check_unknown_fields(data, _COMMAND_BATCH_FIELDS, f"command block #{idx + 1}")
 
-        pane_spec = data.get("pane_index")
+        pane_spec = data.get("pane_indices")
         if pane_spec is None:
-            raise ValueError("Each command block requires a pane_index")
+            raise ValueError("Each command block requires a pane_indices")
 
         pane_commands = _eval_pstring(data.get("commands"), list, field="commands")
         if not isinstance(pane_commands, list):
@@ -132,10 +143,13 @@ class CommandBatch:
             ],
             ssh_server=ssh_server,
             use_sentinel=bool(
-                _eval_pstring(data.get("sentinel", True), bool, field="sentinel")
+                _eval_pstring(data.get("use_sentinel", True), bool, field="use_sentinel")
             ),
             stop_on_error=bool(
                 _eval_pstring(data.get("stop_on_error", False), bool, field="stop_on_error")
+            ),
+            last_sentinel=bool(
+                _eval_pstring(data.get("last_sentinel", False), bool, field="last_sentinel")
             ),
         )
 
@@ -146,20 +160,20 @@ class CommandBatch:
 
     @staticmethod
     def _parse_pane_indices(pane_spec) -> list[int]:
-        pane_spec = _eval_pstring(pane_spec, int, str, list, field="pane_index")
+        pane_spec = _eval_pstring(pane_spec, int, str, list, field="pane_indices")
         if isinstance(pane_spec, int):
             return [pane_spec]
 
         if isinstance(pane_spec, list):
             if not pane_spec:
                 raise FieldParseError(
-                    "pane_index",
+                    "pane_indices",
                     "pane_index arrays cannot be empty",
                     allowed=_PANE_INDEX_ALLOWED_FORMATS,
                 )
             if not all(isinstance(v, int) for v in pane_spec):
                 raise FieldParseError(
-                    "pane_index",
+                    "pane_indices",
                     "pane_index entries must be integers",
                     allowed=_PANE_INDEX_ALLOWED_FORMATS,
                 )
@@ -169,7 +183,7 @@ class CommandBatch:
             pane_spec = pane_spec.strip()
             if not pane_spec:
                 raise FieldParseError(
-                    "pane_index",
+                    "pane_indices",
                     "pane_index string cannot be empty",
                     allowed=_PANE_INDEX_ALLOWED_FORMATS,
                 )
@@ -179,7 +193,7 @@ class CommandBatch:
                     parts = segment.split("-", 1)
                     if len(parts) != 2 or not parts[0] or not parts[1]:
                         raise FieldParseError(
-                            "pane_index",
+                            "pane_indices",
                             f"Invalid pane range '{segment}'",
                             allowed=_PANE_INDEX_ALLOWED_FORMATS,
                         )
@@ -187,13 +201,13 @@ class CommandBatch:
                         start, end = int(parts[0]), int(parts[1])
                     except ValueError:
                         raise FieldParseError(
-                            "pane_index",
+                            "pane_indices",
                             f"Invalid pane range '{segment}'",
                             allowed=_PANE_INDEX_ALLOWED_FORMATS,
                         ) from None
                     if start > end:
                         raise FieldParseError(
-                            "pane_index",
+                            "pane_indices",
                             f"pane range start must be <= end in '{segment}'",
                             allowed=_PANE_INDEX_ALLOWED_FORMATS,
                         )
@@ -203,13 +217,13 @@ class CommandBatch:
                         indices.append(int(segment))
                     except ValueError:
                         raise FieldParseError(
-                            "pane_index",
+                            "pane_indices",
                             f"Invalid pane_index value '{segment}'",
                             allowed=_PANE_INDEX_ALLOWED_FORMATS,
                         ) from None
             if not indices:
                 raise FieldParseError(
-                    "pane_index",
+                    "pane_indices",
                     "pane_index string must resolve to at least one pane",
                     allowed=_PANE_INDEX_ALLOWED_FORMATS,
                 )
@@ -270,7 +284,8 @@ class WindowConfig:
         if not isinstance(value, list):
             raise ValueError("commands section must be a list of command blocks")
         batches = [
-            CommandBatch.from_dict(block, idx) for idx, block in enumerate(value)
+            block if isinstance(block, CommandBatch) else CommandBatch.from_dict(block, idx)
+            for idx, block in enumerate(value)
         ]
         for batch in batches:
             batch.validate_panes(self.num_panes)
@@ -294,7 +309,7 @@ class WindowConfig:
 class SessionConfig:
     session: str
     windows: list[WindowConfig]
-    focus_window: int = 0
+    focus_window: int | str = 0
     kill: bool = False
 
     def __post_init__(self):
@@ -310,13 +325,30 @@ class SessionConfig:
         if self.focus_window is None:
             self.focus_window = 0
         else:
-            self.focus_window = _parse_int_field(self.focus_window, "focus_window")
+            fw = _eval_pstring(self.focus_window, int, str, field="focus_window")
+            if isinstance(fw, str):
+                self.focus_window = fw
+            elif isinstance(fw, int):
+                self.focus_window = fw
+            else:
+                raise FieldParseError(
+                    "focus_window",
+                    f"Invalid focus_window value {fw!r}",
+                    allowed="int (window index) or str (window name)",
+                )
 
         if not isinstance(self.windows, list) or not self.windows:
             raise ValueError("windows must be a non-empty list")
 
-        if self.focus_window < 0 or self.focus_window >= len(self.windows):
-            raise ValueError("focus_window is out of range")
+        if isinstance(self.focus_window, int):
+            if self.focus_window < 0 or self.focus_window >= len(self.windows):
+                raise ValueError("focus_window is out of range")
+        else:
+            window_names = [w.window for w in self.windows if w.window]
+            if self.focus_window not in window_names:
+                raise ValueError(
+                    f"focus_window window name '{self.focus_window}' not found in windows"
+                )
 
     @classmethod
     def from_dict(cls, data: dict) -> "SessionConfig":

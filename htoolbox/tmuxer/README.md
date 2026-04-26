@@ -59,7 +59,7 @@ windows:
     focus_pane: 0
     kill: false
     commands:
-      - pane_index: "0"
+      - pane_indices: "0"
         commands:
           - cd ~/work
           - nvim
@@ -115,12 +115,12 @@ Each item in `commands` targets one or more panes and runs command lines in sequ
 
 ```yaml
 commands:
-  - pane_index: "0-2"
+  - pane_indices: "0-2"
     commands:
       - source ~/.zshrc
       - echo ready
 
-  - pane_index: "1"
+  - pane_indices: "1"
     ssh_server: user@my-host
     commands:
       - cd /srv/app
@@ -129,7 +129,7 @@ commands:
 
 Fields:
 
-- `pane_index` (string, integer, or py-string, required)
+- `pane_indices` (string, integer, or py-string, required)
   Pane selector.
   Common forms:
   - single pane: `"0"`
@@ -147,7 +147,7 @@ Fields:
   ssh -n <ssh_server> 'bash -ic <command>'
   ```
 
-- `sentinel` (boolean, optional, default `true`)
+- `use_sentinel` (boolean, optional, default `true`)
   When `true`, `tmuxer` waits for each command to finish before sending the next batch.
   Set to `false` for fire-and-forget commands that block indefinitely (e.g. `ssh <server>`, `htop`).
   The very last command a pane will run never sends a sentinel regardless of this flag.
@@ -170,12 +170,12 @@ Fields:
 2. Build session, windows, panes.
   1. Session step: check `session`; if `kill: true`, kill old session first.
   2. Window spawn: process `windows` top to bottom; apply window `kill` if set.
-  3. Pane spawn: use `num_panes`; apply `layout`; send `export IID=<pane_index>` to each pane.
+  3. Pane spawn: use `num_panes`; apply `layout`; send `export IID=<pane_indices>` to each pane.
 
 3. Run commands.
-  1. Command run: batches in order; target panes from `pane_index`; send via tmux `send-keys`.
+  1. Command run: batches in order; target panes from `pane_indices`; send via tmux `send-keys`.
   2. SSH mode (when `ssh_server` set): wrap each command with `ssh -n <ssh_server> 'bash -ic "<command>"'` (see [Work with SSH](#work-with-ssh)).
-  3. Sync mode: `sentinel: true` wait; `sentinel: false` no wait, continue.
+  3. Sync mode: `use_sentinel: true` wait; `use_sentinel: false` no wait, continue.
 
 4. Set final focus.
   1. Per-window `focus_pane` during setup.
@@ -195,7 +195,7 @@ kill: py`True`
 layout: py`"ev"`
 
 commands:
-  - pane_index: py`list(range(4))`
+  - pane_indices: py`list(range(4))`
     ssh_server: py`"user@host"`
     commands:
       - py`"echo hello"`
@@ -203,11 +203,12 @@ commands:
 
 Common fields with py-string support:
 - session/window fields: `session`, `window`, `num_panes`, `layout`, `focus_pane`, `focus_window`, `kill`
-- command block fields: `pane_index`, `commands`, `commands[]`, `ssh_server`, `sentinel`
+- command block fields: `pane_indices`, `commands`, `commands[]`, `ssh_server`, `use_sentinel`
 
 Notes:
 - py-string result type must match field type (e.g. `kill` -> bool, `num_panes` -> int).
-- `pane_index` py-strings may return `int`, `str`, or `list[int]`.
+- `pane_indices` py-strings may return `int`, `str`, or `list[int]`.
+
 
 ### Placeholders
 
@@ -246,20 +247,20 @@ windows:
     focus_pane: 0
     kill: true
     commands:
-      - pane_index: "0-1"
+      - pane_indices: "0-1"
         commands:
           - echo "workspace panes ready"
-      - pane_index: "0"
+      - pane_indices: "0"
         commands:
           - cd @@workdir@@
           - bash
-      - pane_index: "1"
+      - pane_indices: "1"
         commands:
           - cd @@workdir@@
           - ls -la
-      # sentinel: false — send the command and move on without waiting
-      - pane_index: "2"
-        sentinel: false
+      # use_sentinel: false — send the command and move on without waiting
+      - pane_indices: "2"
+        use_sentinel: false
         commands:
           - top
   - window: monitoring
@@ -269,10 +270,10 @@ windows:
     kill: true
     synchronized_panes: true
     commands:
-      - pane_index: "0"
+      - pane_indices: "0"
         commands:
           - tail -f /var/log/system.log
-      - pane_index: "1"
+      - pane_indices: "1"
         commands:
           - ping -c 5 8.8.8.8
 ```

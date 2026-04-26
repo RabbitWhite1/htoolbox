@@ -9,21 +9,21 @@ windows:
     kill: true
     synchronized_panes: true
     commands:
-      - pane_index: "0-1"
+      - pane_indices: "0-1"
         commands:
           - echo "workspace panes ready"
           - sleep 20 && ls /eee
-      - pane_index: "0"
+      - pane_indices: "0"
         commands:
           - cd @@workdir@@
           - bash
-      - pane_index: "1"
+      - pane_indices: "1"
         commands:
           - cd @@workdir@@
           - ls -la
-      # sentinel: false — send the command and move on without waiting
-      - pane_index: "2"
-        sentinel: false
+      # use_sentinel: false — send the command and move on without waiting
+      - pane_indices: "2"
+        use_sentinel: false
         commands:
           - top
   - window: monitoring
@@ -32,9 +32,9 @@ windows:
     focus_pane: 0
     kill: true
     commands:
-      - pane_index: "0"
+      - pane_indices: "0"
         commands:
           - tail -f /var/log/system.log
-      - pane_index: "1"
+      - pane_indices: "1"
         commands:
           - ping -c 5 8.8.8.8

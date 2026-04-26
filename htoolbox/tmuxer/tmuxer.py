@@ -41,14 +41,14 @@ windows:
     kill: true
     synchronized_panes: false
     commands:
-      - pane_index: "0-1"
+      - pane_indices: "0-1"
         commands:
           - echo "workspace panes ready"
-      - pane_index: "0"
+      - pane_indices: "0"
         commands:
           - cd @@workdir@@
           - bash
-      - pane_index: "1"
+      - pane_indices: "1"
         commands:
           - cd @@workdir@@
           - ls -la
@@ -274,7 +274,8 @@ def main():
 
         asyncio.run(_attach_and_dispatch())
     except ValueError as exc:
-        rich.print(f"[red]Error:[/red] {exc}")
+        # rich.print(f"[red]Error:[/red] {exc}")
+        raise exc
         raise SystemExit(2)
 
 

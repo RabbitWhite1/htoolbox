@@ -329,7 +329,6 @@ class Service:
             self.panes.clear()
             return
         lines = result.stdout.strip().splitlines()
-
         seen_session_ids: set[int] = set()
         seen_window_ids: set[int] = set()
         seen_pane_ids: set[int] = set()
@@ -419,9 +418,12 @@ class Service:
         _dispatch_commands to send the actual keystrokes.
         """
         existing_session = self.get_session(config.session)
+        session_existed = existing_session is not None
+
         if existing_session is not None:
             if config.kill:
                 existing_session.kill(quiet=True)
+                session_existed = False
             else:
                 for window_cfg in config.windows:
                     if not window_cfg.kill or not window_cfg.window:
@@ -441,7 +443,7 @@ class Service:
         command_jobs: list[CommandJob] = []
 
         for window_index, window_cfg in enumerate(windows):
-            if window_index == 0:
+            if window_index == 0 and not session_existed:
                 session = self.new_session(
                     session_name=session_name,
                     window_name=window_cfg.window,
@@ -454,7 +456,15 @@ class Service:
                     raise RuntimeError(
                         f"Session not found after creation: {session_name}"
                     )
-                window = session.new_window(window_name=window_cfg.window, detach=True)
+                existing_window = (
+                    session.window_by_name(window_cfg.window)
+                    if window_cfg.window
+                    else None
+                )
+                if existing_window is not None:
+                    window = existing_window
+                else:
+                    window = session.new_window(window_name=window_cfg.window, detach=True)
 
             created_windows.append(window)
 
@@ -474,9 +484,19 @@ class Service:
             )
             window.pane_by_index(int(window_cfg.focus_pane), refresh=True).select()
 
-        if focus_window < 0 or focus_window >= len(created_windows):
-            raise ValueError("focus_window is out of range")
-        created_windows[focus_window].select()
+        if isinstance(focus_window, int):
+            if focus_window < 0 or focus_window >= len(created_windows):
+                raise ValueError("focus_window is out of range")
+            created_windows[focus_window].select()
+        else:
+            for w in created_windows:
+                if w.name == focus_window:
+                    w.select()
+                    break
+            else:
+                raise ValueError(
+                    f"focus_window window name '{focus_window}' not found among created windows"
+                )
 
         return command_jobs, session_name
 
@@ -495,6 +515,7 @@ class Service:
             pane_commands: list,
             ssh_server: Optional[str],
             use_sentinel: bool,
+            last_sentinel: bool,
             is_last_batch: bool,
             stop_on_error: bool,
         ):
@@ -507,7 +528,7 @@ class Service:
                     command_text = f"ssh -n {ssh_server} {shlex.quote(remote_command)}"
                 is_last_cmd = is_last_batch and (i == len(pane_commands) - 1)
                 rc = await pane.send_keys(
-                    command_text, use_sentinel=use_sentinel and not is_last_cmd
+                    command_text, use_sentinel=use_sentinel and (not is_last_cmd or last_sentinel)
                 )
                 if stop_on_error and rc is not None and rc != 0:
                     abort.set()
@@ -543,6 +564,7 @@ class Service:
                                 batch.commands,
                                 batch.ssh_server,
                                 batch.use_sentinel,
+                                batch.last_sentinel,
                                 last_batch_for_pane.get(pane_index) == batch_idx,
                                 batch.stop_on_error,
                             )
