@@ -9,7 +9,7 @@ from typing import Optional
 
 import rich
 
-from .config import CommandBatch, SessionConfig
+from .config import Command, CommandBatch, SessionConfig
 
 
 @dataclass
@@ -411,11 +411,23 @@ class Service:
                 return s
         raise RuntimeError("Failed to create new session")
 
-    def create_session(self, config: SessionConfig) -> tuple[list[CommandJob], str]:
+    def _set_session_env(self, session_name: str, env: dict[str, str]) -> None:
+        """Push key=value pairs into a tmux session's environment via setenv."""
+        for name, value in env.items():
+            tmux_run(["setenv", "-t", session_name, name, value])
+
+    def create_session(
+        self,
+        config: SessionConfig,
+        env: Optional[dict[str, str]] = None,
+    ) -> tuple[list[CommandJob], str]:
         """Synchronously create all tmux windows and panes.
 
         Returns (command_jobs, session_name). command_jobs is consumed by
         _dispatch_commands to send the actual keystrokes.
+
+        If env is provided, its key/value pairs are pushed into the tmux session
+        environment via `setenv` so that subsequent windows/panes inherit them.
         """
         existing_session = self.get_session(config.session)
         session_existed = existing_session is not None
@@ -438,6 +450,25 @@ class Service:
 
         if not windows:
             raise ValueError("At least one window must be provided")
+
+        # When env is requested for a brand-new session, bootstrap with a dummy
+        # window so setenv runs before any real window is created — ensuring all
+        # config windows inherit the env uniformly.
+        dummy_window: Optional[Window] = None
+        if not session_existed and env:
+            bootstrap = self.new_session(
+                session_name=session_name,
+                window_name="__tmuxer_init__",
+                detach=True,
+            )
+            dummy_window = sorted(bootstrap.windows(refresh=True), key=lambda w: w.uid)[0]
+            self._set_session_env(session_name, env)
+            session_existed = True  # all config windows now go through new_window
+
+        # For existing sessions (including just-bootstrapped ones), set env
+        # before creating any new windows.
+        if session_existed and env and dummy_window is None:
+            self._set_session_env(session_name, env)
 
         created_windows: list[Window] = []
         command_jobs: list[CommandJob] = []
@@ -498,6 +529,9 @@ class Service:
                     f"focus_window window name '{focus_window}' not found among created windows"
                 )
 
+        if dummy_window is not None:
+            dummy_window.kill(quiet=True)
+
         return command_jobs, session_name
 
     async def _dispatch_commands(self, command_jobs: list[CommandJob]) -> None:
@@ -515,7 +549,6 @@ class Service:
             pane_commands: list,
             ssh_server: Optional[str],
             use_sentinel: bool,
-            last_sentinel: bool,
             is_last_batch: bool,
             stop_on_error: bool,
         ):
@@ -527,8 +560,13 @@ class Service:
                     remote_command = f"bash -ic {shlex.quote(command_text)}"
                     command_text = f"ssh -n {ssh_server} {shlex.quote(remote_command)}"
                 is_last_cmd = is_last_batch and (i == len(pane_commands) - 1)
+                cmd_sentinel = cmd.use_sentinel if isinstance(cmd, Command) else None
+                if cmd_sentinel is not None:
+                    effective_sentinel = cmd_sentinel
+                else:
+                    effective_sentinel = use_sentinel and not is_last_cmd
                 rc = await pane.send_keys(
-                    command_text, use_sentinel=use_sentinel and (not is_last_cmd or last_sentinel)
+                    command_text, use_sentinel=effective_sentinel
                 )
                 if stop_on_error and rc is not None and rc != 0:
                     abort.set()
@@ -564,7 +602,6 @@ class Service:
                                 batch.commands,
                                 batch.ssh_server,
                                 batch.use_sentinel,
-                                batch.last_sentinel,
                                 last_batch_for_pane.get(pane_index) == batch_idx,
                                 batch.stop_on_error,
                             )

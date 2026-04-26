@@ -214,6 +214,11 @@ def main():
         action="store_true",
         help="Create and configure tmux session in detached mode without attaching",
     )
+    parser.add_argument(
+        "--setenv",
+        action="store_true",
+        help="Push the current environment into the tmux session via setenv so all windows inherit it",
+    )
 
     args = parser.parse_args()
 
@@ -244,7 +249,8 @@ def main():
             return
 
         service = Service()
-        command_jobs, session_name = service.create_session(config=session_config)
+        env = dict(os.environ) if args.setenv else None
+        command_jobs, session_name = service.create_session(config=session_config, env=env)
 
         if args.detach:
             # No attach — dispatch in foreground then exit.

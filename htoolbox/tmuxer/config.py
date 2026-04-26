@@ -14,7 +14,7 @@ LAYOUT_ALIASES = {
 }
 LAYOUT_OPTIONS = set(LAYOUT_ALIASES.values()).union(set(LAYOUT_ALIASES.keys()))
 
-_COMMAND_BATCH_FIELDS = {"pane_indices", "commands", "ssh_server", "use_sentinel", "last_sentinel", "stop_on_error"}
+_COMMAND_BATCH_FIELDS = {"pane_indices", "commands", "ssh_server", "use_sentinel", "stop_on_error"}
 _WINDOW_CONFIG_FIELDS = {"window", "num_panes", "layout", "focus_pane", "commands", "kill", "ssh_server", "synchronized_panes"}
 _SESSION_CONFIG_FIELDS = {"session", "focus_window", "windows", "kill"}
 _PANE_INDEX_ALLOWED_FORMATS = "int, list[int], or string specs like '0', '0-2', '0,2' (field: pane_indices)"
@@ -85,14 +85,53 @@ def _parse_int_field(value, field: str) -> int:
     raise FieldParseError(field, f"Invalid integer value {parsed!r}", allowed="int")
 
 
+_COMMAND_FIELDS = {"command", "use_sentinel"}
+
+
+@dataclass
+class Command:
+    command: str
+    use_sentinel: Optional[bool] = None  # None = inherit from CommandBatch
+
+    def __post_init__(self):
+        if not isinstance(self.command, str):
+            raise TypeError("command must be a string")
+        if self.use_sentinel is not None and not isinstance(self.use_sentinel, bool):
+            raise TypeError("use_sentinel must be a bool or None")
+
+    @classmethod
+    def from_value(cls, value, idx: int = 0) -> "Command":
+        """Accept a plain string or a dict with 'command' and optional 'use_sentinel'."""
+        if isinstance(value, cls):
+            return value
+        value = _eval_pstring(value, str, dict, field=f"commands[{idx}]")
+        if isinstance(value, str):
+            return cls(command=value)
+        if isinstance(value, dict):
+            _check_unknown_fields(value, _COMMAND_FIELDS, f"commands[{idx}]")
+            cmd = _eval_pstring(value.get("command"), str, field=f"commands[{idx}].command")
+            if not isinstance(cmd, str):
+                raise ValueError(f"commands[{idx}].command must be a string")
+            raw_sentinel = value.get("use_sentinel")
+            use_sentinel = (
+                None
+                if raw_sentinel is None
+                else bool(_eval_pstring(raw_sentinel, bool, field=f"commands[{idx}].use_sentinel"))
+            )
+            return cls(command=cmd, use_sentinel=use_sentinel)
+        raise ValueError(f"commands[{idx}] must be a string or a dict")
+
+    def __str__(self):
+        return self.command
+
+
 @dataclass
 class CommandBatch:
     pane_indices: list[int]
-    commands: list[str]
+    commands: list[str | Command]
     ssh_server: Optional[str] = None
     use_sentinel: bool = True
     stop_on_error: bool = False
-    last_sentinel: bool = False
 
     def __post_init__(self):
         if not isinstance(self.pane_indices, list) or not all(
@@ -100,15 +139,13 @@ class CommandBatch:
         ):
             raise TypeError("pane_indices must be a list of ints")
         if not isinstance(self.commands, list) or not all(
-            isinstance(c, str) for c in self.commands
+            isinstance(c, (str, Command)) for c in self.commands
         ):
-            raise TypeError("commands must be a list of strings")
+            raise TypeError("commands must be a list of strings or Command objects")
         if self.ssh_server is not None and not isinstance(self.ssh_server, str):
             raise TypeError("ssh_server must be a string or None")
         if not isinstance(self.use_sentinel, bool):
             raise TypeError("use_sentinel must be a bool")
-        if not isinstance(self.last_sentinel, bool):
-            raise TypeError("last_sentinel must be a bool")
 
     @classmethod
     def from_dict(cls, data: dict, idx: int = 0) -> "CommandBatch":
@@ -139,7 +176,8 @@ class CommandBatch:
         return cls(
             pane_indices=cls._parse_pane_indices(pane_spec),
             commands=[
-                _eval_pstring(cmd, str, field="commands[]") for cmd in pane_commands
+                cmd if isinstance(cmd, (str, Command)) else Command.from_value(cmd, i)
+                for i, cmd in enumerate(pane_commands)
             ],
             ssh_server=ssh_server,
             use_sentinel=bool(
@@ -147,9 +185,6 @@ class CommandBatch:
             ),
             stop_on_error=bool(
                 _eval_pstring(data.get("stop_on_error", False), bool, field="stop_on_error")
-            ),
-            last_sentinel=bool(
-                _eval_pstring(data.get("last_sentinel", False), bool, field="last_sentinel")
             ),
         )
 
