@@ -11,7 +11,7 @@ Commands:
   start [options]   Submit a long-running job (sbatch ... --wrap "hostname && sleep infinity")
   run [options]     Run an interactive Bash using srun
   bash <job>        Attach an interactive shell to a job (by ID or name)
-  kill <job>        Cancel a job (by ID or name)
+  kill <job>...     Cancel one or more jobs (by ID or name)
 
 Global options:
   -h, --help        Show this help message and exit
@@ -126,13 +126,16 @@ case "${subcommand}" in
 	kill)
 		case "${1-}" in
 			""|-h|--help)
-				echo "Usage: smagic kill <jobid-or-name>" >&2
+				echo "Usage: smagic kill <jobid-or-name> [<jobid-or-name> ...]" >&2
 				exit 1
 				;;
 			*)
-				target="$1"
-				jobid="$(get_jobid_for_target "${target}")" || exit 1
-				run_and_echo scancel "${jobid}"
+				jobids=()
+				for target in "$@"; do
+					jobid="$(get_jobid_for_target "${target}")" || exit 1
+					jobids+=("${jobid}")
+				done
+				run_and_echo scancel "${jobids[@]}"
 				;;
 		esac
 		;;
