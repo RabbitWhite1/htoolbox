@@ -12,6 +12,8 @@ Commands:
   run [options]     Run an interactive Bash using srun
   bash <job>        Attach an interactive shell to a job (by ID or name)
   kill <job>...     Cancel one or more jobs (by ID or name)
+  rkill <begin> <last>
+                    Cancel your jobs whose ID is in [begin, last] (inclusive)
 
 Global options:
   -h, --help        Show this help message and exit
@@ -71,13 +73,14 @@ shift || true
 
 case "${subcommand}" in
 	ps)
+		ps_format='%.9i %.9P %.32j %.8u %.2t %.11M %.5D %R'
 		case "${1-}" in
 			-a|--all)
 				shift || true
-				run_and_echo squeue "$@"
+				run_and_echo squeue --format="${ps_format}" "$@"
 				;;
 			*)
-				run_and_echo squeue -u "${USER}" "$@"
+				run_and_echo squeue --format="${ps_format}" -u "${USER}" "$@"
 				;;
 		esac
 		;;
@@ -130,14 +133,62 @@ case "${subcommand}" in
 				exit 1
 				;;
 			*)
+				# Snapshot the user's jobs once instead of calling squeue per target.
+				jobs_snapshot="$(squeue -h -u "${USER}" -o "%i %j" 2>/dev/null || true)"
 				jobids=()
 				for target in "$@"; do
-					jobid="$(get_jobid_for_target "${target}")" || exit 1
+					jobid=""
+					while read -r jid jname; do
+						if [[ "${jid}" == "${target}" || "${jname}" == "${target}" ]]; then
+							jobid="${jid}"
+							break
+						fi
+					done <<< "${jobs_snapshot}"
+
+					# If nothing matched but the target is numeric, treat it as a job ID directly.
+					if [[ -z "${jobid}" && "${target}" =~ ^[0-9]+$ ]]; then
+						jobid="${target}"
+					fi
+
+					if [[ -z "${jobid}" ]]; then
+						echo "smagic: no job found for target '${target}'" >&2
+						exit 1
+					fi
 					jobids+=("${jobid}")
 				done
 				run_and_echo scancel "${jobids[@]}"
 				;;
 		esac
+		;;
+
+	rkill)
+		begin="${1-}"
+		last="${2-}"
+		if [[ -z "${begin}" || -z "${last}" ]]; then
+			echo "Usage: smagic rkill <begin> <last>" >&2
+			exit 1
+		fi
+		if ! [[ "${begin}" =~ ^[0-9]+$ && "${last}" =~ ^[0-9]+$ ]]; then
+			echo "smagic: rkill requires numeric job IDs" >&2
+			exit 1
+		fi
+		if (( begin > last )); then
+			echo "smagic: rkill begin (${begin}) must be <= last (${last})" >&2
+			exit 1
+		fi
+
+		jobids=()
+		while read -r jid; do
+			if (( jid >= begin && jid <= last )); then
+				jobids+=("${jid}")
+			fi
+		done < <(squeue -h -u "${USER}" -o "%i" 2>/dev/null || true)
+
+		if [[ ${#jobids[@]} -eq 0 ]]; then
+			echo "smagic: no jobs found in range [${begin}, ${last}]" >&2
+			exit 1
+		fi
+		run_and_echo scancel "${jobids[@]}"
 		;;
 
 	*)
