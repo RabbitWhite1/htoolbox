@@ -34,14 +34,15 @@ def tmux_run(
     )
 
 
-async def tmux_run_async(tmux_args, capture_output=False, check=False):
+async def tmux_run_async(tmux_args, capture_output=False, check=False, input=None):
     """Async tmux runner using asyncio subprocesses — no threads."""
+    stdin = asyncio.subprocess.PIPE if input is not None else None
     stdout = asyncio.subprocess.PIPE if capture_output else None
     stderr = asyncio.subprocess.PIPE if capture_output else None
     proc = await asyncio.create_subprocess_exec(
-        "tmux", *tmux_args, stdout=stdout, stderr=stderr
+        "tmux", *tmux_args, stdin=stdin, stdout=stdout, stderr=stderr
     )
-    stdout_data, _ = await proc.communicate()
+    stdout_data, _ = await proc.communicate(input=input)
     if check and proc.returncode != 0:
         raise subprocess.CalledProcessError(proc.returncode, ["tmux", *tmux_args])
     return subprocess.CompletedProcess(
@@ -77,10 +78,16 @@ class Pane:
     ) -> Optional[int]:
         """Send keys to this pane and optionally wait for completion via a sentinel echo.
         Returns the exit code of the command, or None if sentinel is not used / timed out."""
-        cmd = ["send-keys", "-t", f"%{self.uid}", str(command)]
+        target = f"%{self.uid}"
+        text = str(command)
+        buf_name = f"tmuxer_{self.uid}_{self._send_count}"
+        chunk_size = 64
+        for i in range(0, len(text), chunk_size):
+            chunk = text[i : i + chunk_size]
+            await tmux_run_async(["load-buffer", "-b", buf_name, "-"], input=chunk.encode())
+            await tmux_run_async(["paste-buffer", "-t", target, "-d", "-p", "-b", buf_name])
         if enter:
-            cmd.append("C-m")
-        await tmux_run_async(cmd)
+            await tmux_run_async(["send-keys", "-t", target, "C-m"])
         if not enter or not use_sentinel:
             return None
         sentinel = f"__TMUXER_{self._send_count}__"
