@@ -73,7 +73,7 @@ shift || true
 
 case "${subcommand}" in
 	ps)
-		ps_format='%.9i %.9P %.32j %.8u %.2t %.11M %.5D %R'
+		ps_format='%.9i %.9P %.24j %.2t %.5D %.19e %R'
 		case "${1-}" in
 			-a|--all)
 				shift || true
