@@ -173,8 +173,7 @@ class Window:
 
     def select_layout(self, layout: str) -> None:
         """Set the layout of panes in a tmux window."""
-        target = f"{self.session.name}:{self.name}"
-        tmux_run(["select-layout", "-t", target, layout])
+        tmux_run(["select-layout", "-t", f"@{self.uid}", layout])
 
     def select(self) -> None:
         """Select this window as active."""
@@ -240,7 +239,10 @@ class Session:
     def new_window(self, window_name: str = None, detach: bool = True) -> Window:
         """Create a new tmux window in this session."""
         existing_window_ids = {w.uid for w in self.windows(refresh=True)}
-        target = self.name
+        # `=<name>:` targets exactly this session. A bare name also resolves to
+        # a *window* of that name in another session (e.g. the caller's own),
+        # where new-window then fails or lands.
+        target = f"={self.name}:"
         cmd = ["new-window"]
         if detach:
             cmd.append("-d")
@@ -279,11 +281,11 @@ class Session:
 
     def attach(self) -> None:
         """Attach to this tmux session."""
-        tmux_run(["attach-session", "-t", self.name])
+        tmux_run(["attach-session", "-t", f"={self.name}"])
 
     def kill(self, quiet: bool = True) -> None:
         """Kill this tmux session."""
-        cmd = ["kill-session", "-t", self.name]
+        cmd = ["kill-session", "-t", f"={self.name}"]
         if quiet:
             tmux_run(
                 cmd,
@@ -421,7 +423,7 @@ class Service:
     def _set_session_env(self, session_name: str, env: dict[str, str]) -> None:
         """Push key=value pairs into a tmux session's environment via setenv."""
         for name, value in env.items():
-            tmux_run(["setenv", "-t", session_name, name, value])
+            tmux_run(["setenv", "-t", f"={session_name}", name, value])
 
     def create_session(
         self,
