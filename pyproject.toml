@@ -21,6 +21,7 @@ dev = [
 [project.scripts]
 tmuxer = "htoolbox.tmuxer.tmuxer:main"
 vd = "htoolbox.downloader.vd:main"
+ballast = "htoolbox.ballast.ballast:main"
 
 [build-system]
 requires = ["setuptools>=61.0", "wheel"]

@@ -49,6 +49,12 @@ Creates and configures tmux sessions/windows/panes from CLI flags or config file
 
 - Component README: [htoolbox/tmuxer/README.md](htoolbox/tmuxer/README.md)
 
+### ballast
+
+Adaptive CPU + memory load generator that keeps total system usage near a target percentage.
+
+- Component README: [htoolbox/ballast/README.md](htoolbox/ballast/README.md)
+
 ### singularity (smagic)
 
 Wrapper script for common singularity command workflows.

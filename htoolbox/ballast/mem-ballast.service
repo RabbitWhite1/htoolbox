@@ -1,0 +1,9 @@
+[Unit]
+Description=Adaptive CPU/memory ballast
+
+[Service]
+ExecStart=/usr/bin/python3 /opt/ballast.py --mem 25 --cpu 25 --lock -q
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
