@@ -30,6 +30,8 @@ ballast --cpu 40                   # CPU only
 | `--no-nice` | off | don't renice CPU workers to 19 |
 | `--cpu-period-ms N` | 100 | CPU worker duty-cycle period |
 | `-q, --quiet` | off | no status line (printed every 5 s otherwise) |
+| `--tmuxer` | | run in the background in tmux session `__htoolbox_ballast__` instead |
+| `--install-service` | | install, enable and start as a systemd user service instead |
 
 Status line: `mem <system%> (target <current%>) others <MiB> ballast <MiB> | cpu <system%> (target <current%>) others <%> duty <%>`.
 
@@ -53,9 +55,32 @@ for steady targets.
 With several instances running, each one draws its own targets, so the combined
 total follows whichever instance currently has the highest target.
 
-## As a service
+## Running in the background
 
-See [`mem-ballast.service`](mem-ballast.service):
+All other arguments are passed through unchanged. Both modes run this exact
+`ballast.py` with the current Python interpreter.
+
+```sh
+ballast --mem 25 --cpu 25 --tmuxer            # detached tmux session
+tmux attach -t __htoolbox_ballast__           # watch it
+tmux kill-session -t __htoolbox_ballast__     # stop it
+
+ballast --mem 25 --cpu 25 -q --install-service   # systemd user service
+systemctl --user status ballast.service
+journalctl --user -u ballast.service -f
+systemctl --user disable --now ballast.service && rm ~/.config/systemd/user/ballast.service
+```
+
+- `--tmuxer` refuses to start if the session `__htoolbox_ballast__` already exists,
+  and shows what is running in it instead.
+- `--install-service` writes `~/.config/systemd/user/ballast.service` and runs
+  `daemon-reload`, `enable` and `restart`. Running it again with new arguments
+  updates the unit. It never overwrites a `ballast.service` it didn't generate.
+  User services stop at logout unless lingering is on (`loginctl enable-linger`).
+
+## As a system service
+
+For a system-wide service (e.g. with `--lock` as root), see [`mem-ballast.service`](mem-ballast.service):
 
 ```sh
 sudo cp ballast.py /opt/ballast.py
