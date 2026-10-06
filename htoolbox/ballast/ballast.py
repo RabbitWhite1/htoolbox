@@ -503,6 +503,42 @@ def start_in_tmux(argv: list[str]) -> int:
     return 0
 
 
+def ensure_linger() -> None:
+    """Offer to enable lingering so the user service starts at boot."""
+    if shutil.which("loginctl") is None:
+        return
+    uid = str(os.getuid())
+    linger = subprocess.run(
+        ["loginctl", "show-user", uid, "-p", "Linger", "--value"],
+        capture_output=True,
+        text=True,
+        check=False,
+    ).stdout.strip()
+    if linger == "yes":
+        return
+    print(
+        "Lingering is off: the service only runs while you are logged in "
+        "and won't start at boot."
+    )
+    if not sys.stdin.isatty():
+        print("To fix: loginctl enable-linger")
+        return
+    try:
+        answer = input("Enable lingering now (loginctl enable-linger)? [Y/n] ")
+    except (EOFError, KeyboardInterrupt):
+        print()
+        answer = "n"
+    if answer.strip().lower() not in ("", "y", "yes"):
+        print("Skipped. To enable later: loginctl enable-linger")
+        return
+    if subprocess.run(["loginctl", "enable-linger", uid], check=False).returncode:
+        print(
+            "ballast: enabling lingering failed; try: sudo loginctl enable-linger $USER"
+        )
+    else:
+        print("Lingering enabled: the service now starts at boot.")
+
+
 def install_service(argv: list[str], lock: bool) -> int:
     unit_dir = (
         Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
@@ -549,25 +585,13 @@ WantedBy=default.target
         if subprocess.run(step, check=False).returncode != 0:
             sys.exit(f"ballast: `{shlex.join(step)}` failed")
 
-    linger = ""
-    if shutil.which("loginctl"):
-        linger = subprocess.run(
-            ["loginctl", "show-user", os.environ.get("USER", ""), "-p", "Linger"],
-            capture_output=True,
-            text=True,
-            check=False,
-        ).stdout.strip()
     print(
         f"ballast: {SERVICE_NAME} enabled and started.\n"
         f"Status: systemctl --user status {SERVICE_NAME}\n"
         f"Logs:   journalctl --user -u {SERVICE_NAME} -f\n"
         f"Remove: systemctl --user disable --now {SERVICE_NAME} && rm {unit}"
     )
-    if linger != "Linger=yes":
-        print(
-            "Note: lingering is off, so the service stops when you log out. "
-            "To keep it running: loginctl enable-linger"
-        )
+    ensure_linger()
     if lock:
         print(
             "Note: --lock in a user service needs a high enough memlock limit "

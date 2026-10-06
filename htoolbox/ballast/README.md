@@ -76,7 +76,9 @@ systemctl --user disable --now ballast.service && rm ~/.config/systemd/user/ball
 - `--install-service` writes `~/.config/systemd/user/ballast.service` and runs
   `daemon-reload`, `enable` and `restart`. Running it again with new arguments
   updates the unit. It never overwrites a `ballast.service` it didn't generate.
-  User services stop at logout unless lingering is on (`loginctl enable-linger`).
+  User services start at boot and keep running after logout only with lingering
+  on. If it's off, `--install-service` asks `[Y/n]` whether to run
+  `loginctl enable-linger` (non-interactive runs just print the command).
 
 ## As a system service
 
